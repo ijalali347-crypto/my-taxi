@@ -55,6 +55,7 @@ main{padding:14px}
 .card strong{font-size:19px}
 .hero strong{font-size:32px}
 }
+select{display:block;width:100%;padding:12px;border:1px solid #b8cec1;border-radius:9px;margin-top:7px;font-size:16px;background:white;color:#193c32}.dailyCatchup{background:#fff8e8;border:1px solid #ecd7a7;border-radius:12px;padding:16px;margin:16px 0}.dailyCatchup p{display:flex;justify-content:space-between;gap:12px}.dailyCatchup strong{font-size:19px}
 </style>
 <link rel="manifest" href="./manifest.webmanifest">
 <link rel="icon" type="image/png" href="./icons/taxi-192.png">
@@ -67,6 +68,8 @@ main{padding:14px}
 <main>
 <h1>🚕 Taxi Collection Tracker</h1>
 <p class="muted">Daily collections and monthly targets</p>
+<label>Taxi company<select id="company"><option value="arabia">ARABIA TAXI</option><option value="dtc">DTC DRIVER’S</option></select></label>
+<p class="muted" id="companyRates"></p>
 
 <section class="panel" id="installPanel" style="margin:18px 0">
 <div class="row"><img src="./icons/taxi-192.png" width="52" height="52" alt="" style="border-radius:12px"><div style="flex:1"><strong>Install My Taxi</strong><p id="installHelp" class="muted" style="margin:6px 0">Install on your phone to open in its own app window.</p></div><button type="button" id="installApp">Install app</button></div>
@@ -121,8 +124,8 @@ main{padding:14px}
 <small>Booking customers must also be included in total customers.</small>
 
 <div class="breakdown">
-<p><span>Fuel: hired km × AED 0.85</span><span id="fuel"></span></p>
-<p><span>Bookings: AED 6 each</span><span id="bookingFee"></span></p>
+<p><span><span id="fuelLabel">Fuel</span></span><span id="fuel"></span></p>
+<p><span><span id="bookingLabel">Bookings</span></span><span id="bookingFee"></span></p>
 <p><span>RTA: AED 2 per customer</span><span id="rta"></span></p>
 <p><span>Tollgates</span><span id="tollFee"></span></p>
 <p><span>Total deductions</span><span id="deductions"></span></p>
@@ -130,6 +133,14 @@ main{padding:14px}
 <div id="dailyStatus"></div>
 </div>
 
+<section class="dailyCatchup">
+<h2 id="catchupTitle">Daily remaining after previous days</h2>
+<p><span>Net collected before this date</span><span id="priorNet"></span></p>
+<p><span>Daily goal after previous days</span><strong id="adjustedGoal"></strong></p>
+<p><span>Net collection entered for this date</span><span id="enteredNet"></span></p>
+<p><span>Still needed for this date</span><strong id="dayRemaining"></strong></p>
+<small id="catchupNote"></small>
+</section>
 <div class="row">
 <button type="submit">Save collection</button>
 <button type="button" class="danger" id="delete">Delete this day</button>
@@ -143,12 +154,12 @@ main{padding:14px}
 <h2>Monthly calendar</h2>
 <small>Tap any date to add or edit its collection.</small>
 <div class="calendar" id="calendar"></div>
-<small>Green: AED 350 or more · Amber: below AED 350</small>
+<small><span id="calendarLegend"></span></small>
 
 <div class="breakdown">
 <p><span>Total meter collection</span><strong id="grossTotal"></strong></p>
 <p><span>Total deductions</span><strong id="deductionTotal"></strong></p>
-<p><span>Days reaching AED 350</span><strong id="achieved"></strong></p>
+<p><span><span id="achievedLabel">Days reaching target</span></span><strong id="achieved"></strong></p>
 </div>
 
 <p class="muted">
@@ -183,7 +194,7 @@ Past days without entries count as elapsed days.
 </section>
 
 <footer>
-Daily target: AED 350 after all deductions.
+<span id="footerTarget"></span>
 Monthly target automatically follows the number of calendar days.
 Your records stay in this browser on this device.
 They do not sync between phones. Download backups regularly.
@@ -193,8 +204,15 @@ They do not sync between phones. Download backups regularly.
 <script>
 "use strict";
 
-const KEY = "taxi-collection-v1";
-const DAILY_TARGET = 350;
+const COMPANIES = {
+  arabia: {name: "ARABIA TAXI", target: 350, fuel: 0.85, booking: 6, rta: 2},
+  dtc: {name: "DTC DRIVER’S", target: 425, fuel: 0.66, booking: 7, rta: 2}
+};
+let companyId = "arabia";
+try {const chosen=localStorage.getItem("taxi-selected-company");if(COMPANIES[chosen])companyId=chosen;}catch(error){}
+const company = COMPANIES[companyId];
+const KEY = companyId === "arabia" ? "taxi-collection-v1" : "taxi-collection-dtc-v1";
+const DAILY_TARGET = company.target;
 const $ = id => document.getElementById(id);
 const round = n => Math.round((n + Number.EPSILON) * 100) / 100;
 const money = n => "AED " + n.toLocaleString("en-AE", {
@@ -235,9 +253,9 @@ function validRecord(record) {
 }
 
 function calculate(record) {
-  const fuel = round(record.km * 0.85);
-  const booking = record.bookings * 6;
-  const rta = record.customers * 2;
+  const fuel = round(record.km * company.fuel);
+  const booking = record.bookings * company.booking;
+  const rta = record.customers * company.rta;
   const deductions = round(fuel + booking + rta + record.tolls);
 
   return {
@@ -288,9 +306,32 @@ function readForm() {
   );
 }
 
+function dailyPlan(date, allRecords, configuration) {
+  const [year,month,day]=date.split("-").map(Number);
+  const count=new Date(year,month,0).getDate();
+  const prefix=date.slice(0,7);
+  const prior=round(Object.entries(allRecords)
+    .filter(([d])=>d.startsWith(prefix)&&d<date)
+    .reduce((sum,[,r])=>sum+round(r.meter-round(round(r.km*configuration.fuel)+r.bookings*configuration.booking+r.customers*configuration.rta+r.tolls)),0));
+  const days=count-day+1;
+  const remaining=Math.max(0,round(count*configuration.target-prior));
+  return {prior,days,goal:remaining/days};
+}
+function updateDailyPlan(net) {
+  const date=$("date").value;
+  if(!validDate(date))return;
+  const plan=dailyPlan(date,records,company);
+  $("catchupTitle").textContent="Daily remaining · "+date;
+  $("priorNet").textContent=money(plan.prior);
+  $("adjustedGoal").textContent=money(plan.goal);
+  $("enteredNet").textContent=money(net);
+  $("dayRemaining").textContent=money(Math.max(0,plan.goal-net));
+  $("catchupNote").textContent="Monthly target minus earlier days’ net collection, divided by "+plan.days+" calendar days from this date through month end. This date’s entry is subtracted only from its daily goal.";
+}
 function preview() {
   const record = readForm();
   const result = calculate(record);
+  updateDailyPlan(result.net);
 
   $("fuel").textContent = money(result.fuel);
   $("bookingFee").textContent = money(result.booking);
@@ -377,7 +418,7 @@ function render() {
         : "Month complete";
 
   $("pace").textContent = summary.days
-    ? "Across " + summary.days + " remaining days · Base target AED 350/day"
+    ? "Across " + summary.days + " remaining days · Base target AED " + DAILY_TARGET + "/day"
     : summary.remaining
       ? money(summary.remaining) + " below the monthly target"
       : "Monthly target achieved";
@@ -558,8 +599,8 @@ function download(text, filename, type) {
 
 $("backup").onclick = () => {
   download(
-    JSON.stringify({ version: 1, records }, null, 2),
-    "taxi-backup-" + today() + ".json",
+    JSON.stringify({ version: 2, companyId, records }, null, 2),
+    "taxi-backup-" + companyId + "-" + today() + ".json",
     "application/json"
   );
 };
@@ -576,7 +617,7 @@ $("file").onchange = async () => {
     const data = JSON.parse(await file.text());
 
     if (
-      data.version !== 1 ||
+      ![1,2].includes(data.version) ||
       !data.records ||
       typeof data.records !== "object" ||
       Array.isArray(data.records)
@@ -584,6 +625,11 @@ $("file").onchange = async () => {
       throw new Error("Invalid backup");
     }
 
+    const backupCompany=data.version===1?"arabia":data.companyId;
+    if(backupCompany!==companyId){
+      $("message").textContent="This backup belongs to "+(COMPANIES[backupCompany]?.name||"another company")+". Select that company first.";
+      return;
+    }
     for (const [date, record] of Object.entries(data.records)) {
       if (!validDate(date) || date > today() || !validRecord(record)) {
         throw new Error("Invalid entry");
@@ -634,11 +680,27 @@ $("csv").onclick = () => {
 
   download(
     lines.join("\r\n"),
-    "taxi-" + summary.month + ".csv",
+    "taxi-" + companyId + "-" + summary.month + ".csv",
     "text/csv"
   );
 };
 
+$("company").value=companyId;
+$("companyRates").textContent=company.name+" · Daily target "+money(DAILY_TARGET)+" · Fuel "+money(company.fuel)+"/hired km · Booking "+money(company.booking)+" · RTA "+money(company.rta)+"/trip";
+$("fuelLabel").textContent="Fuel: hired km × "+money(company.fuel);
+$("bookingLabel").textContent="Bookings: "+money(company.booking)+" each";
+$("calendarLegend").textContent="Green: "+money(DAILY_TARGET)+" or more · Amber: below target";
+$("achievedLabel").textContent="Days reaching "+money(DAILY_TARGET);
+$("footerTarget").textContent=company.name+" daily target: "+money(DAILY_TARGET)+" after all deductions.";
+$("company").addEventListener("change",()=>{
+  const next=$("company").value;
+  if(!COMPANIES[next])return;
+  const current=records[$("date").value];
+  const dirty=fields.some(key=>$(key).value!==""&&Number($(key).value)!==(current?current[key]:0));
+  if(dirty&&!confirm("Switch company? Unsaved entries on this form will be lost.")){$("company").value=companyId;return;}
+  try{localStorage.setItem("taxi-selected-company",next);window.location.reload();}
+  catch(error){$("company").value=companyId;$("message").textContent="Unable to change company. Check browser storage settings.";}
+});
 $("date").max = today();
 $("month").value = today().slice(0, 7);
 loadDay(today());
