@@ -639,5 +639,45 @@ setInterval(() => {
   render();
 }, 60000);
 </script>
+<script>
+(function () {
+  const status = document.createElement("p");
+  status.id = "offlineStatus";
+  status.setAttribute("role", "status");
+  status.style.cssText = "text-align:center;padding:12px;color:#12644e;font-size:14px";
+  status.textContent = "Preparing offline access…";
+  document.querySelector("main").appendChild(status);
+  if (!("serviceWorker" in navigator)) {
+    status.textContent = "This browser does not support offline access.";
+    return;
+  }
+  async function check() {
+    const worker = navigator.serviceWorker.controller;
+    if (!worker) return;
+    const channel = new MessageChannel();
+    const timer = setTimeout(() => {
+      status.textContent = "Offline setup pending. Reopen the app online.";
+    }, 8000);
+    channel.port1.onmessage = event => {
+      clearTimeout(timer);
+      status.textContent = event.data.ready
+        ? (navigator.onLine ? "✓ Offline ready — records save on this device."
+                            : "✓ Working offline — records save on this device.")
+        : "Connect online to finish offline setup.";
+      channel.port1.close();
+    };
+    worker.postMessage("CHECK_OFFLINE", [channel.port2]);
+  }
+  navigator.serviceWorker.addEventListener("controllerchange", check);
+  window.addEventListener("online", check);
+  window.addEventListener("offline", check);
+  navigator.serviceWorker.register("./sw.js").then(async () => {
+    await navigator.serviceWorker.ready;
+    check();
+  }).catch(() => {
+    status.textContent = "Offline setup failed. Open the published app online and refresh.";
+  });
+})();
+</script>
 </body>
 </html>
