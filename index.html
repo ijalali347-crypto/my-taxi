@@ -56,6 +56,7 @@ main{padding:14px}
 .hero strong{font-size:32px}
 }
 [hidden]{display:none!important}select{display:block;width:100%;padding:12px;border:1px solid #b8cec1;border-radius:9px;margin-top:7px;font-size:16px;background:white;color:#193c32}.dailyCatchup{background:#fff8e8;border:1px solid #ecd7a7;border-radius:12px;padding:16px;margin:16px 0}.dailyCatchup p{display:flex;justify-content:space-between;gap:12px}.dailyCatchup strong{font-size:19px}
+.offday{background:#e0e5ec;color:#445066}
 </style>
 <link rel="manifest" href="./manifest.webmanifest">
 <link rel="icon" type="image/png" href="./icons/taxi-192.png">
@@ -102,6 +103,8 @@ main{padding:14px}
 <h2>Daily collection</h2>
 <form id="form">
 <label>Date<input type="date" id="date" required></label>
+<label>Day status<select id="dayStatus"><option value="working">Working day</option><option value="breakdown">Not working — taxi breakdown</option><option value="accident">Not working — taxi accident</option></select></label>
+<small>Save the non-working day to remove its daily target. Missing entries still count toward the target.</small>
 
 <div class="fields">
 <label>Meter collection — AED
@@ -162,6 +165,7 @@ main{padding:14px}
 <small><span id="calendarLegend"></span></small>
 
 <div class="breakdown">
+<p><span>Counted target days / excluded days</span><strong id="targetDays"></strong></p>
 <p><span>Total meter collection</span><strong id="grossTotal"></strong></p>
 <p><span>Total deductions</span><strong id="deductionTotal"></strong></p>
 <p><span><span id="achievedLabel">Days reaching target</span></span><strong id="achieved"></strong></p>
@@ -178,7 +182,7 @@ Past days without entries count as elapsed days.
 
 <section class="panel history" id="arabiaSalary" hidden aria-live="polite">
 <h2>Arabia Taxi · Month-end salary</h2>
-<p class="muted">One commission rate applies to the whole month’s saved clean money. Daily average = monthly clean money ÷ calendar days, including days without entries.</p>
+<p class="muted">One commission rate applies to the whole month’s saved clean money. Daily average = monthly clean money ÷ counted days. Saved accident/breakdown days are excluded; missing entries still count.</p>
 <div id="salaryWaiting"></div>
 <div id="salaryDetails" class="breakdown" hidden>
 <p><span>Monthly clean money</span><strong id="salaryNet"></strong></p>
@@ -204,7 +208,7 @@ Past days without entries count as elapsed days.
 <table>
 <thead>
 <tr>
-<th>Date</th><th>Meter</th><th>Hired km</th>
+<th>Date</th><th>Status</th><th>Meter</th><th>Hired km</th>
 <th>Customers</th><th>Bookings</th><th>Tolls</th>
 <th>Deductions</th><th>Net AED</th>
 </tr>
@@ -216,7 +220,7 @@ Past days without entries count as elapsed days.
 
 <footer>
 <span id="footerTarget"></span>
-Monthly target automatically follows the number of calendar days.
+Monthly target = daily target × calendar days minus saved accident/breakdown days.
 Your records stay in this browser on this device.
 They do not sync between phones. Download backups regularly.
 </footer>
@@ -288,10 +292,14 @@ function validRecord(record) {
     ) &&
     Number.isInteger(record.customers) &&
     Number.isInteger(record.bookings) &&
-    record.bookings <= record.customers;
+    record.bookings <= record.customers &&
+    (record.status===undefined||["working","breakdown","accident"].includes(record.status)) &&
+    (!isOff(record)||fields.every(key=>record[key]===0));
 }
 
+function isOff(record){return record?.status==="breakdown"||record?.status==="accident";}
 function calculate(record) {
+  if(isOff(record))return {fuel:0,booking:0,rta:0,deductions:0,net:0};
   const fuel = round(record.km * company.fuel);
   const booking = record.bookings * company.booking;
   const rta = record.customers * company.rta;
@@ -340,27 +348,33 @@ function persist(next) {
 }
 
 function readForm() {
-  return Object.fromEntries(
-    fields.map(key => [key, Number($(key).value) || 0])
-  );
+  const status=$("dayStatus").value;
+  return {...Object.fromEntries(fields.map(key=>[key,status==="working"?(Number($(key).value)||0):0])),status};
+}
+function syncDayStatus(){
+  const off=$("dayStatus").value!=="working";
+  fields.forEach(key=>{$(key).disabled=off;$(key).required=!off;});
 }
 
-function dailyPlan(date, allRecords, configuration, enteredNet) {
+function dailyPlan(date, allRecords, configuration, enteredNet, status="working") {
   const [year,month,day]=date.split("-").map(Number);
   const count=new Date(year,month,0).getDate();
   const prefix=date.slice(0,7);
   const prior=round(Object.entries(allRecords)
-    .filter(([d])=>d.startsWith(prefix)&&d<date)
+    .filter(([d,r])=>d.startsWith(prefix)&&d<date&&!isOff(r))
     .reduce((sum,[,r])=>sum+round(r.meter-round(round(r.km*configuration.fuel)+r.bookings*configuration.booking+r.customers*configuration.rta+r.tolls)),0));
   const total=round(prior+enteredNet);
-  const days=count-day;
-  const remaining=Math.max(0,round(count*configuration.target-total));
+  const excluded=Object.entries(allRecords).filter(([d,r])=>d.startsWith(prefix)&&d!==date&&isOff(r));
+  const currentOff=status!=="working";
+  const counted=count-excluded.length-(currentOff?1:0);
+  const days=count-day-excluded.filter(([d])=>d>date).length;
+  const remaining=Math.max(0,round(counted*configuration.target-total));
   return {total,days,remaining,goal:days?remaining/days:0};
 }
 function updateDailyPlan(net) {
   const date=$("date").value;
   if(!validDate(date))return;
-  const plan=dailyPlan(date,records,company,net);
+  const plan=dailyPlan(date,records,company,net,$("dayStatus").value);
   $("catchupTitle").textContent="Asking rate after "+date;
   $("fixedDaily").textContent=money(DAILY_TARGET);
   $("priorNet").textContent=money(plan.total);
@@ -374,6 +388,7 @@ function updateDailyPlan(net) {
                      : "Monthly target achieved.";
 }
 function preview() {
+  syncDayStatus();
   const record = readForm();
   const result = calculate(record);
   updateDailyPlan(result.net);
@@ -386,7 +401,7 @@ function preview() {
   $("net").textContent = money(result.net);
 
   $("dailyStatus").textContent =
-    result.net >= DAILY_TARGET
+    isOff(record) ? "Non-working day: daily target removed when saved." : result.net >= DAILY_TARGET
       ? "Target reached! " + money(result.net - DAILY_TARGET) + " above target."
       : money(DAILY_TARGET - result.net) + " below the daily target.";
 }
@@ -394,6 +409,7 @@ function preview() {
 function loadDay(date) {
   $("date").value = date;
   const record = records[date];
+  $("dayStatus").value=record?.status||"working";
 
   fields.forEach(key => {
     $(key).value = record ? record[key] : key === "tolls" ? 0 : "";
@@ -427,8 +443,11 @@ function monthSummary() {
     if (records[now]) elapsed += 1;
   }
 
-  const days = count - elapsed;
-  const target = count * DAILY_TARGET;
+  const excluded=entries.filter(([,record])=>isOff(record));
+  const countedDays=count-excluded.length;
+  const remainingExcluded=excluded.filter(([date])=>Number(date.slice(8))>elapsed).length;
+  const days = count - elapsed - remainingExcluded;
+  const target = countedDays * DAILY_TARGET;
   const remaining = Math.max(0, round(target - total));
 
   return {
@@ -436,6 +455,8 @@ function monthSummary() {
     year,
     monthNumber,
     count,
+    countedDays,
+    excludedDays:excluded.length,
     entries,
     total,
     target,
@@ -447,6 +468,7 @@ function monthSummary() {
 
 
 function arabiaCommission(total, calendarDays) {
+  if(calendarDays<=0)return {average:0,rate:0,driver:0,companyShare:0};
   const rate = total >= 350 * calendarDays ? 35
     : total >= 300 * calendarDays ? 30
     : total >= 275 * calendarDays ? 25
@@ -464,13 +486,13 @@ function renderArabiaSalary(summary) {
   $("salaryWaiting").hidden = available;
   $("salaryWaiting").textContent = "Your salary calculation appears on " + lastDate + " after saving your collections.";
   if (!available) return;
-  const salary = arabiaCommission(summary.total, summary.count);
+  const salary = arabiaCommission(summary.total, summary.countedDays);
   $("salaryNet").textContent = money(summary.total);
   $("salaryAverage").textContent = money(salary.average);
   $("salaryRate").textContent = salary.rate + "%";
   $("salaryDriver").textContent = money(salary.driver);
   $("salaryCompany").textContent = money(salary.companyShare) + " (" + (100 - salary.rate) + "%)";
-  $("salaryNote").textContent = "Calculated from " + summary.entries.length + " saved days out of " + summary.count + ". Missing entries count as zero. Save or correct entries to update the amount. Commission uses the unrounded average.";
+  $("salaryNote").textContent = "Calculated across " + summary.countedDays + " counted days; " + summary.excludedDays + " accident/breakdown days excluded. Missing entries count as zero. Commission uses the unrounded average.";
 }
 
 function render() {
@@ -497,7 +519,8 @@ function render() {
       ? money(summary.remaining) + " below the monthly target"
       : "Monthly target achieved";
 
-  const percent = Math.max(0, summary.total / summary.target * 100);
+  const percent = summary.target>0?Math.max(0, summary.total / summary.target * 100):0;
+  $("targetDays").textContent=summary.countedDays+" / "+summary.excludedDays;
   $("bar").style.width = Math.min(100, percent) + "%";
   $("progressText").textContent =
     percent.toFixed(1) + "% of monthly target collected";
@@ -515,7 +538,7 @@ function render() {
   $("achieved").textContent =
     summary.entries.filter(
       ([, record]) => calculate(record).net >= DAILY_TARGET
-    ).length + " / " + summary.count;
+    ).length + " / " + summary.countedDays;
 
   const calendar = $("calendar");
   calendar.replaceChildren();
@@ -544,7 +567,7 @@ function render() {
     button.className = "day";
 
     if (record) {
-      button.classList.add(result.net >= DAILY_TARGET ? "good" : "low");
+      button.classList.add(isOff(record)?"offday":result.net >= DAILY_TARGET ? "good" : "low");
     }
     if (date === $("date").value) button.classList.add("selected");
     if (date === today()) button.classList.add("today");
@@ -552,11 +575,11 @@ function render() {
     button.textContent = day;
     button.setAttribute(
       "aria-label",
-      date + (record ? ", net " + money(result.net) : ", no entry")
+      date + (isOff(record)?", not working: "+record.status:record ? ", net " + money(result.net) : ", no entry")
     );
 
     const amount = document.createElement("small");
-    amount.textContent = record ? result.net.toFixed(2) : "—";
+    amount.textContent = isOff(record)?"OFF":record ? result.net.toFixed(2) : "—";
     button.append(amount);
 
     button.onclick = () => {
@@ -578,6 +601,7 @@ function render() {
 
     [
       date,
+      record.status||"working",
       record.meter.toFixed(2),
       record.km,
       record.customers,
@@ -597,7 +621,7 @@ function render() {
   if (!summary.entries.length) {
     const row = document.createElement("tr");
     const cell = document.createElement("td");
-    cell.colSpan = 8;
+    cell.colSpan = 9;
     cell.textContent = "No saved collections this month.";
     row.append(cell);
     history.append(row);
@@ -639,6 +663,7 @@ $("form").addEventListener("submit", event => {
     return;
   }
 
+  if(isOff(record)&&records[date]&&!isOff(records[date])&&fields.some(key=>records[date][key]>0)&&!confirm("Marking this as non-working replaces its saved collection with zero. Continue?"))return;
   if (persist({ ...records, [date]: record })) {
     $("month").value = date.slice(0, 7);
     loadDay(date);
@@ -736,13 +761,14 @@ $("csv").onclick = () => {
   const summary = monthSummary();
 
   const lines = [
-    "Date,Meter AED,Hired km,Customers,Bookings,Tolls AED,Fuel AED,Booking fees AED,RTA AED,Deductions AED,Net AED"
+    "Date,Status,Meter AED,Hired km,Customers,Bookings,Tolls AED,Fuel AED,Booking fees AED,RTA AED,Deductions AED,Net AED"
   ];
 
   summary.entries.forEach(([date, record]) => {
     const result = calculate(record);
     lines.push([
       date,
+      record.status||"working",
       record.meter,
       record.km,
       record.customers,
@@ -770,7 +796,7 @@ $("kabiShift").value=kabiShift;
 function switchKabiProfile(){
   const current=records[$("date").value];
   const dirty=fields.some(key=>$(key).value!==""&&Number($(key).value)!==(current?current[key]:0));
-  if(dirty&&!confirm("Change vehicle or shift? Unsaved form entries will be lost.")){
+  if((dirty||$("dayStatus").value!==(current?.status||"working"))&&!confirm("Change vehicle or shift? Unsaved form entries will be lost.")){
     $("kabiVehicle").value=kabiVehicle;$("kabiShift").value=kabiShift;return;
   }
   try{
@@ -784,7 +810,7 @@ $("kabiShift").addEventListener("change",switchKabiProfile);
 $("companyRates").textContent=company.name+" · Daily target "+money(DAILY_TARGET)+" · Fuel "+money(company.fuel)+"/hired km · Booking "+money(company.booking)+" · RTA "+money(company.rta)+"/trip";
 $("fuelLabel").textContent="Fuel: hired km × "+money(company.fuel);
 $("bookingLabel").textContent="Bookings: "+money(company.booking)+" each";
-$("calendarLegend").textContent="Green: "+money(DAILY_TARGET)+" or more · Amber: below target";
+$("calendarLegend").textContent="Green: "+money(DAILY_TARGET)+" or more · Amber: below target · OFF: excluded day";
 $("achievedLabel").textContent="Days reaching "+money(DAILY_TARGET);
 $("footerTarget").textContent=company.name+" daily target: "+money(DAILY_TARGET)+" after all deductions.";
 $("company").addEventListener("change",()=>{
