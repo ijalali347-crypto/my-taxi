@@ -55,7 +55,7 @@ main{padding:14px}
 .card strong{font-size:19px}
 .hero strong{font-size:32px}
 }
-select{display:block;width:100%;padding:12px;border:1px solid #b8cec1;border-radius:9px;margin-top:7px;font-size:16px;background:white;color:#193c32}.dailyCatchup{background:#fff8e8;border:1px solid #ecd7a7;border-radius:12px;padding:16px;margin:16px 0}.dailyCatchup p{display:flex;justify-content:space-between;gap:12px}.dailyCatchup strong{font-size:19px}
+[hidden]{display:none!important}select{display:block;width:100%;padding:12px;border:1px solid #b8cec1;border-radius:9px;margin-top:7px;font-size:16px;background:white;color:#193c32}.dailyCatchup{background:#fff8e8;border:1px solid #ecd7a7;border-radius:12px;padding:16px;margin:16px 0}.dailyCatchup p{display:flex;justify-content:space-between;gap:12px}.dailyCatchup strong{font-size:19px}
 </style>
 <link rel="manifest" href="./manifest.webmanifest">
 <link rel="icon" type="image/png" href="./icons/taxi-192.png">
@@ -68,8 +68,12 @@ select{display:block;width:100%;padding:12px;border:1px solid #b8cec1;border-rad
 <main>
 <h1>🚕 Taxi Collection Tracker</h1>
 <p class="muted">Daily collections and monthly targets</p>
-<label>Taxi company<select id="company"><option value="arabia">ARABIA TAXI</option><option value="dtc">DTC DRIVER’S</option></select></label>
-<p class="muted" id="companyRates"></p>
+<label>Taxi company<select id="company"><option value="arabia">ARABIA TAXI</option><option value="dtc">DTC DRIVER’S</option><option value="kabi">KABI TAXI</option></select></label>
+<div id="kabiOptions" class="fields" hidden>
+<label>Vehicle<select id="kabiVehicle"><option value="innova">Toyota Innova</option><option value="camry">Toyota Camry</option><option value="sonata">Hyundai Sonata</option></select></label>
+<label>Shift<select id="kabiShift"><option value="day">Day shift</option><option value="night">Night shift</option></select></label>
+<p class="muted" style="grid-column:1/-1">Collections and backups are kept separately for each vehicle and shift.</p>
+</div><p class="muted" id="companyRates"></p>
 
 <section class="panel" id="installPanel" style="margin:18px 0">
 <div class="row"><img src="./icons/taxi-192.png" width="52" height="52" alt="" style="border-radius:12px"><div style="flex:1"><strong>Install My Taxi</strong><p id="installHelp" class="muted" style="margin:6px 0">Install on your phone to open in its own app window.</p></div><button type="button" id="installApp">Install app</button></div>
@@ -207,12 +211,30 @@ They do not sync between phones. Download backups regularly.
 
 const COMPANIES = {
   arabia: {name: "ARABIA TAXI", target: 350, fuel: 0.85, booking: 6, rta: 2},
-  dtc: {name: "DTC DRIVER’S", target: 425, fuel: 0.66, booking: 7, rta: 2}
+  dtc: {name: "DTC DRIVER’S", target: 425, fuel: 0.66, booking: 7, rta: 2},
+  kabi: {name: "KABI TAXI", target: 360, fuel: 0.86, booking: 7, rta: 2}
 };
 let companyId = "arabia";
 try {const chosen=localStorage.getItem("taxi-selected-company");if(COMPANIES[chosen])companyId=chosen;}catch(error){}
-const company = COMPANIES[companyId];
-const KEY = companyId === "arabia" ? "taxi-collection-v1" : "taxi-collection-dtc-v1";
+const KABI_VEHICLES = {
+  innova: {name:"Toyota Innova",day:360,night:435},
+  camry: {name:"Toyota Camry",day:360,night:410},
+  sonata: {name:"Hyundai Sonata",day:315,night:315}
+};
+let kabiVehicle="innova",kabiShift="day";
+try {
+  const v=localStorage.getItem("taxi-kabi-vehicle");
+  const s=localStorage.getItem("taxi-kabi-shift");
+  if(KABI_VEHICLES[v])kabiVehicle=v;
+  if(["day","night"].includes(s))kabiShift=s;
+}catch(error){}
+const profileId=companyId==="kabi"?kabiVehicle+"-"+kabiShift:null;
+const company = {...COMPANIES[companyId]};
+if(companyId==="kabi") {
+  company.target=KABI_VEHICLES[kabiVehicle][kabiShift];
+  company.name+=" · "+KABI_VEHICLES[kabiVehicle].name+" · "+kabiShift+" shift";
+}
+const KEY = companyId === "arabia" ? "taxi-collection-v1" : companyId==="dtc" ? "taxi-collection-dtc-v1" : "taxi-collection-kabi-"+profileId+"-v1";
 const DAILY_TARGET = company.target;
 const $ = id => document.getElementById(id);
 const round = n => Math.round((n + Number.EPSILON) * 100) / 100;
@@ -606,8 +628,8 @@ function download(text, filename, type) {
 
 $("backup").onclick = () => {
   download(
-    JSON.stringify({ version: 2, companyId, records }, null, 2),
-    "taxi-backup-" + companyId + "-" + today() + ".json",
+    JSON.stringify({ version: 2, companyId, profileId, records }, null, 2),
+    "taxi-backup-" + companyId + (profileId?"-"+profileId:"") + "-" + today() + ".json",
     "application/json"
   );
 };
@@ -635,6 +657,10 @@ $("file").onchange = async () => {
     const backupCompany=data.version===1?"arabia":data.companyId;
     if(backupCompany!==companyId){
       $("message").textContent="This backup belongs to "+(COMPANIES[backupCompany]?.name||"another company")+". Select that company first.";
+      return;
+    }
+    if(companyId==="kabi"&&data.profileId!==profileId){
+      $("message").textContent="Select the KABI vehicle and shift that match this backup ("+String(data.profileId||"unknown")+").";
       return;
     }
     for (const [date, record] of Object.entries(data.records)) {
@@ -687,12 +713,29 @@ $("csv").onclick = () => {
 
   download(
     lines.join("\r\n"),
-    "taxi-" + companyId + "-" + summary.month + ".csv",
+    "taxi-" + companyId + (profileId?"-"+profileId:"") + "-" + summary.month + ".csv",
     "text/csv"
   );
 };
 
 $("company").value=companyId;
+$("kabiOptions").hidden=companyId!=="kabi";
+$("kabiVehicle").value=kabiVehicle;
+$("kabiShift").value=kabiShift;
+function switchKabiProfile(){
+  const current=records[$("date").value];
+  const dirty=fields.some(key=>$(key).value!==""&&Number($(key).value)!==(current?current[key]:0));
+  if(dirty&&!confirm("Change vehicle or shift? Unsaved form entries will be lost.")){
+    $("kabiVehicle").value=kabiVehicle;$("kabiShift").value=kabiShift;return;
+  }
+  try{
+    localStorage.setItem("taxi-kabi-vehicle",$("kabiVehicle").value);
+    localStorage.setItem("taxi-kabi-shift",$("kabiShift").value);
+    window.location.reload();
+  }catch(error){$("message").textContent="Unable to save vehicle and shift. Check browser storage settings.";}
+}
+$("kabiVehicle").addEventListener("change",switchKabiProfile);
+$("kabiShift").addEventListener("change",switchKabiProfile);
 $("companyRates").textContent=company.name+" · Daily target "+money(DAILY_TARGET)+" · Fuel "+money(company.fuel)+"/hired km · Booking "+money(company.booking)+" · RTA "+money(company.rta)+"/trip";
 $("fuelLabel").textContent="Fuel: hired km × "+money(company.fuel);
 $("bookingLabel").textContent="Bookings: "+money(company.booking)+" each";
