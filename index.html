@@ -175,6 +175,22 @@ Past days without entries count as elapsed days.
 </section>
 </div>
 
+
+<section class="panel history" id="arabiaSalary" hidden aria-live="polite">
+<h2>Arabia Taxi · Month-end salary</h2>
+<p class="muted">One commission rate applies to the whole month’s saved clean money. Daily average = monthly clean money ÷ calendar days, including days without entries.</p>
+<div id="salaryWaiting"></div>
+<div id="salaryDetails" class="breakdown" hidden>
+<p><span>Monthly clean money</span><strong id="salaryNet"></strong></p>
+<p><span>Average clean money per day</span><strong id="salaryAverage"></strong></p>
+<p><span>Driver commission rate</span><strong id="salaryRate"></strong></p>
+<p class="net"><span>Amount you will receive</span><strong id="salaryDriver"></strong></p>
+<p><span>Company share</span><strong id="salaryCompany"></strong></p>
+<small id="salaryNote"></small>
+</div>
+<details><summary>Commission tiers</summary><p>AED 350 or more/day: 35% driver · 65% company<br>AED 300 to below 350: 30% · 70%<br>AED 275 to below 300: 25% · 75%<br>AED 250 to below 275: 20% · 80%<br>AED 200 to below 250: 15% · 85%<br>Below AED 200: 10% · 90%</p></details>
+</section>
+
 <section class="panel history">
 <h2>Saved collections</h2>
 <div class="row">
@@ -429,10 +445,39 @@ function monthSummary() {
   };
 }
 
+
+function arabiaCommission(total, calendarDays) {
+  const rate = total >= 350 * calendarDays ? 35
+    : total >= 300 * calendarDays ? 30
+    : total >= 275 * calendarDays ? 25
+    : total >= 250 * calendarDays ? 20
+    : total >= 200 * calendarDays ? 15 : 10;
+  const driver = round(total * rate / 100);
+  return {average: total / calendarDays, rate, driver, companyShare: round(total - driver)};
+}
+function renderArabiaSalary(summary) {
+  $("arabiaSalary").hidden = companyId !== "arabia";
+  if (companyId !== "arabia") return;
+  const lastDate = summary.month + "-" + String(summary.count).padStart(2, "0");
+  const available = today() >= lastDate;
+  $("salaryDetails").hidden = !available;
+  $("salaryWaiting").hidden = available;
+  $("salaryWaiting").textContent = "Your salary calculation appears on " + lastDate + " after saving your collections.";
+  if (!available) return;
+  const salary = arabiaCommission(summary.total, summary.count);
+  $("salaryNet").textContent = money(summary.total);
+  $("salaryAverage").textContent = money(salary.average);
+  $("salaryRate").textContent = salary.rate + "%";
+  $("salaryDriver").textContent = money(salary.driver);
+  $("salaryCompany").textContent = money(salary.companyShare) + " (" + (100 - salary.rate) + "%)";
+  $("salaryNote").textContent = "Calculated from " + summary.entries.length + " saved days out of " + summary.count + ". Missing entries count as zero. Save or correct entries to update the amount. Commission uses the unrounded average.";
+}
+
 function render() {
   if (!/^\d{4}-\d{2}$/.test($("month").value)) return;
 
   const summary = monthSummary();
+  renderArabiaSalary(summary);
 
   $("target").textContent = money(summary.target);
   $("collected").textContent = money(summary.total);
