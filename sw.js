@@ -1,5 +1,6 @@
 "use strict";
-const CACHE_NAME = "taxi-offline-" + new URL(self.registration.scope).pathname + "-v1";
+const CACHE_NAME = "taxi-offline-" + new URL(self.registration.scope).pathname + "-v2";
+const ASSETS = ["index.html","manifest.webmanifest","icons/taxi-192.png","icons/taxi-512.png","icons/taxi-180.png"].map(path=>new URL(path,self.registration.scope).href);
 const APP = new URL("index.html", self.registration.scope).href;
 self.addEventListener("install", event => {
   event.waitUntil((async () => {
@@ -7,6 +8,7 @@ self.addEventListener("install", event => {
     const response = await fetch(new Request(APP, {cache: "reload"}));
     if (!response.ok) throw new Error("Unable to cache taxi app");
     await cache.put(APP, response);
+    await cache.addAll(ASSETS.filter(url=>url!==APP));
     await self.skipWaiting();
   })());
 });

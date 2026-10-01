@@ -56,12 +56,21 @@ main{padding:14px}
 .hero strong{font-size:32px}
 }
 </style>
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="icon" type="image/png" href="./icons/taxi-192.png">
+<link rel="apple-touch-icon" href="./icons/taxi-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="My Taxi">
 </head>
 <body>
 <main>
 <h1>🚕 Taxi Collection Tracker</h1>
 <p class="muted">Daily collections and monthly targets</p>
 
+<section class="panel" id="installPanel" style="margin:18px 0">
+<div class="row"><img src="./icons/taxi-192.png" width="52" height="52" alt="" style="border-radius:12px"><div style="flex:1"><strong>Install My Taxi</strong><p id="installHelp" class="muted" style="margin:6px 0">Install on your phone to open in its own app window.</p></div><button type="button" id="installApp">Install app</button></div>
+</section>
 <label>View month
 <input type="month" id="month">
 </label>
@@ -677,6 +686,36 @@ setInterval(() => {
   }).catch(() => {
     status.textContent = "Offline setup failed. Open the published app online and refresh.";
   });
+})();
+</script>
+<script>
+(function(){
+  let promptEvent=null;
+  const button=document.getElementById("installApp");
+  const help=document.getElementById("installHelp");
+  const standalone=()=>window.matchMedia("(display-mode: standalone)").matches||navigator.standalone;
+  function state(){
+    if(standalone()){help.textContent="My Taxi is installed and running as an app.";button.hidden=true;}
+  }
+  state();
+  window.addEventListener("beforeinstallprompt",event=>{
+    event.preventDefault();promptEvent=event;
+    help.textContent="Ready to install. Tap Install app.";button.hidden=false;
+  });
+  window.addEventListener("appinstalled",()=>{
+    promptEvent=null;help.textContent="Installed! Open My Taxi from your app screen.";button.hidden=true;
+  });
+  button.onclick=async()=>{
+    if(promptEvent){
+      const event=promptEvent;promptEvent=null;
+      await event.prompt();const choice=await event.userChoice;
+      help.textContent=choice.outcome==="accepted"?"Installation requested. Check your app screen.":"You can install later from your browser menu.";
+    }else{
+      help.textContent=/iPad|iPhone|iPod/.test(navigator.userAgent)
+        ?"In Safari: Share → Add to Home Screen → Open as Web App (if shown) → Add."
+        :"Open this page in Chrome on your phone. Tap ⋮ → Install app, or Add to Home screen → Install. If only a shortcut appears, refresh online and try again.";
+    }
+  };
 })();
 </script>
 </body>
