@@ -134,11 +134,12 @@ select{display:block;width:100%;padding:12px;border:1px solid #b8cec1;border-rad
 </div>
 
 <section class="dailyCatchup">
-<h2 id="catchupTitle">Daily remaining after previous days</h2>
-<p><span>Net collected before this date</span><span id="priorNet"></span></p>
-<p><span>Daily goal after previous days</span><strong id="adjustedGoal"></strong></p>
-<p><span>Net collection entered for this date</span><span id="enteredNet"></span></p>
-<p><span>Still needed for this date</span><strong id="dayRemaining"></strong></p>
+<h2 id="catchupTitle">Asking rate after this collection</h2>
+<p><span>Fixed daily target</span><span id="fixedDaily"></span></p>
+<p><span>Net collected through this date</span><span id="priorNet"></span></p>
+<p><span>Monthly target still needed</span><span id="enteredNet"></span></p>
+<p><span>Days remaining after this date</span><span id="dayRemaining"></span></p>
+<p><span>🎯 Required per remaining day</span><strong id="adjustedGoal"></strong></p>
 <small id="catchupNote"></small>
 </section>
 <div class="row">
@@ -306,27 +307,33 @@ function readForm() {
   );
 }
 
-function dailyPlan(date, allRecords, configuration) {
+function dailyPlan(date, allRecords, configuration, enteredNet) {
   const [year,month,day]=date.split("-").map(Number);
   const count=new Date(year,month,0).getDate();
   const prefix=date.slice(0,7);
   const prior=round(Object.entries(allRecords)
     .filter(([d])=>d.startsWith(prefix)&&d<date)
     .reduce((sum,[,r])=>sum+round(r.meter-round(round(r.km*configuration.fuel)+r.bookings*configuration.booking+r.customers*configuration.rta+r.tolls)),0));
-  const days=count-day+1;
-  const remaining=Math.max(0,round(count*configuration.target-prior));
-  return {prior,days,goal:remaining/days};
+  const total=round(prior+enteredNet);
+  const days=count-day;
+  const remaining=Math.max(0,round(count*configuration.target-total));
+  return {total,days,remaining,goal:days?remaining/days:0};
 }
 function updateDailyPlan(net) {
   const date=$("date").value;
   if(!validDate(date))return;
-  const plan=dailyPlan(date,records,company);
-  $("catchupTitle").textContent="Daily remaining · "+date;
-  $("priorNet").textContent=money(plan.prior);
-  $("adjustedGoal").textContent=money(plan.goal);
-  $("enteredNet").textContent=money(net);
-  $("dayRemaining").textContent=money(Math.max(0,plan.goal-net));
-  $("catchupNote").textContent="Monthly target minus earlier days’ net collection, divided by "+plan.days+" calendar days from this date through month end. This date’s entry is subtracted only from its daily goal.";
+  const plan=dailyPlan(date,records,company,net);
+  $("catchupTitle").textContent="Asking rate after "+date;
+  $("fixedDaily").textContent=money(DAILY_TARGET);
+  $("priorNet").textContent=money(plan.total);
+  $("enteredNet").textContent=money(plan.remaining);
+  $("dayRemaining").textContent=plan.days;
+  $("adjustedGoal").textContent=plan.remaining===0?"Target reached!":plan.days?money(plan.goal):"Month complete";
+  const filled=fields.some(key=>key!=="tolls"&&$(key).value!=="");
+  $("catchupNote").textContent=plan.days
+    ? "Includes earlier saved days plus this date’s "+money(net)+" clean money. "+(filled?"Preview updates as you type. Save collection to keep it. ":"Enter this date’s collection to update the rate.")+" Collect "+money(plan.goal)+" per day for the remaining "+plan.days+" days."
+    : plan.remaining ? "No days remain in this month. Shortfall: "+money(plan.remaining)+"."
+                     : "Monthly target achieved.";
 }
 function preview() {
   const record = readForm();
