@@ -1,1 +1,643 @@
-blob:https://chatgpt.com/f4826175-d0d5-4399-a8e4-f1cc1a5e159f
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#123c35">
+<title>Taxi Collection Tracker</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#f2f6f4;color:#193c32;font-family:Arial,sans-serif}
+main{max-width:1050px;margin:auto;padding:20px}
+h1{margin-bottom:6px}
+h2{font-size:20px}
+small,.muted{color:#60776e}
+.hero{background:#123c35;color:white;padding:25px;border-radius:20px;margin:20px 0}
+.hero small{color:#c0dccf}
+.hero strong{display:block;font-size:38px;margin:12px 0}
+.cards{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+.card,.panel{background:white;padding:20px;border-radius:16px;border:1px solid #dbe6df}
+.card strong{display:block;font-size:22px;margin-top:10px}
+.layout{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:20px}
+label{display:block;margin-bottom:15px;font-size:14px;font-weight:bold}
+input{display:block;width:100%;padding:12px;border:1px solid #b8cec1;border-radius:9px;margin-top:7px;font-size:16px}
+button{padding:12px 15px;background:#12644e;color:white;border:0;border-radius:9px;font-size:15px;cursor:pointer}
+button:disabled{opacity:.4;cursor:default}
+.secondary{background:#e8f1ec;color:#193c32}
+.danger{background:#ffeded;color:#a32b2b}
+.fields{display:grid;grid-template-columns:1fr 1fr;gap:0 12px}
+.breakdown{background:#f1f6f3;padding:15px;border-radius:12px;margin:16px 0}
+.breakdown p{display:flex;justify-content:space-between;gap:10px}
+.net{border-top:1px solid #cbdcd1;padding-top:15px;font-size:20px;font-weight:bold}
+.calendar{display:grid;grid-template-columns:repeat(7,1fr);gap:5px;margin:18px 0}
+.weekday{text-align:center;font-size:12px;padding:8px 0}
+.day{background:#eef3ef;color:#193c32;padding:10px 2px;min-height:63px;border:2px solid transparent}
+.day small{display:block;font-size:10px;margin-top:6px}
+.good{background:#d7f0e2}
+.low{background:#fff0d1}
+.selected{border-color:#12644e}
+.today{box-shadow:inset 0 0 0 1px #dfa52f}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.progress{height:9px;background:#45685a;border-radius:10px;margin:18px 0;overflow:hidden}
+.progress div{height:100%;background:#efc263}
+#message{min-height:24px;color:#12644e;line-height:1.5}
+.history{margin-top:20px}
+.scroll{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th,td{text-align:left;padding:12px 8px;border-bottom:1px solid #e0e9e3;white-space:nowrap}
+footer{font-size:13px;color:#60776e;line-height:1.7;margin:22px 0}
+button:focus-visible,input:focus-visible{outline:3px solid #dfa52f;outline-offset:2px}
+@media(max-width:700px){
+main{padding:14px}
+.cards{grid-template-columns:1fr 1fr}
+.layout{grid-template-columns:1fr}
+.card{padding:15px}
+.card strong{font-size:19px}
+.hero strong{font-size:32px}
+}
+</style>
+</head>
+<body>
+<main>
+<h1>🚕 Taxi Collection Tracker</h1>
+<p class="muted">Daily collections and monthly targets</p>
+
+<label>View month
+<input type="month" id="month">
+</label>
+
+<section class="hero">
+<small>REQUIRED PER REMAINING DAY</small>
+<strong id="required">AED 0.00</strong>
+<div id="pace"></div>
+<div class="progress"><div id="bar"></div></div>
+<div id="progressText"></div>
+</section>
+
+<section class="cards">
+<div class="card"><small>Monthly target</small><strong id="target"></strong></div>
+<div class="card"><small>Net collected</small><strong id="collected"></strong></div>
+<div class="card"><small>Still needed</small><strong id="remaining"></strong></div>
+<div class="card"><small>Remaining days</small><strong id="days"></strong></div>
+</section>
+
+<div class="layout">
+<section class="panel">
+<h2>Daily collection</h2>
+<form id="form">
+<label>Date<input type="date" id="date" required></label>
+
+<div class="fields">
+<label>Meter collection — AED
+<input type="number" id="meter" min="0" step="0.01" required>
+</label>
+
+<label>Hired kilometres
+<input type="number" id="km" min="0" step="0.01" required>
+</label>
+
+<label>Total customers / trips
+<input type="number" id="customers" min="0" step="1" required>
+</label>
+
+<label>Booking customers
+<input type="number" id="bookings" min="0" step="1" required>
+</label>
+
+<label>Tollgate charges — AED
+<input type="number" id="tolls" min="0" step="0.01" value="0" required>
+</label>
+</div>
+
+<small>Booking customers must also be included in total customers.</small>
+
+<div class="breakdown">
+<p><span>Fuel: hired km × AED 0.85</span><span id="fuel"></span></p>
+<p><span>Bookings: AED 6 each</span><span id="bookingFee"></span></p>
+<p><span>RTA: AED 2 per customer</span><span id="rta"></span></p>
+<p><span>Tollgates</span><span id="tollFee"></span></p>
+<p><span>Total deductions</span><span id="deductions"></span></p>
+<p class="net"><span>Clean money</span><span id="net"></span></p>
+<div id="dailyStatus"></div>
+</div>
+
+<div class="row">
+<button type="submit">Save collection</button>
+<button type="button" class="danger" id="delete">Delete this day</button>
+</div>
+
+<p id="message" role="status" aria-live="polite"></p>
+</form>
+</section>
+
+<section class="panel">
+<h2>Monthly calendar</h2>
+<small>Tap any date to add or edit its collection.</small>
+<div class="calendar" id="calendar"></div>
+<small>Green: AED 350 or more · Amber: below AED 350</small>
+
+<div class="breakdown">
+<p><span>Total meter collection</span><strong id="grossTotal"></strong></p>
+<p><span>Total deductions</span><strong id="deductionTotal"></strong></p>
+<p><span>Days reaching AED 350</span><strong id="achieved"></strong></p>
+</div>
+
+<p class="muted">
+Today counts as a remaining day until you save today's collection.
+After saving, the daily requirement applies from tomorrow.
+Past days without entries count as elapsed days.
+</p>
+</section>
+</div>
+
+<section class="panel history">
+<h2>Saved collections</h2>
+<div class="row">
+<button type="button" class="secondary" id="backup">Download backup</button>
+<button type="button" class="secondary" id="restore">Restore backup</button>
+<button type="button" class="secondary" id="csv">Export month CSV</button>
+</div>
+<input type="file" id="file" accept=".json,application/json" hidden>
+
+<div class="scroll">
+<table>
+<thead>
+<tr>
+<th>Date</th><th>Meter</th><th>Hired km</th>
+<th>Customers</th><th>Bookings</th><th>Tolls</th>
+<th>Deductions</th><th>Net AED</th>
+</tr>
+</thead>
+<tbody id="history"></tbody>
+</table>
+</div>
+</section>
+
+<footer>
+Daily target: AED 350 after all deductions.
+Monthly target automatically follows the number of calendar days.
+Your records stay in this browser on this device.
+They do not sync between phones. Download backups regularly.
+</footer>
+</main>
+
+<script>
+"use strict";
+
+const KEY = "taxi-collection-v1";
+const DAILY_TARGET = 350;
+const $ = id => document.getElementById(id);
+const round = n => Math.round((n + Number.EPSILON) * 100) / 100;
+const money = n => "AED " + n.toLocaleString("en-AE", {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2
+});
+const fields = ["meter", "km", "customers", "bookings", "tolls"];
+
+function today() {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Dubai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(new Date());
+
+  const value = name => parts.find(p => p.type === name).value;
+  return value("year") + "-" + value("month") + "-" + value("day");
+}
+
+function validDate(date) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return false;
+  const parsed = new Date(date + "T12:00:00Z");
+  return !isNaN(parsed) && parsed.toISOString().slice(0, 10) === date;
+}
+
+function validRecord(record) {
+  return record &&
+    fields.every(key =>
+      typeof record[key] === "number" &&
+      Number.isFinite(record[key]) &&
+      record[key] >= 0 &&
+      record[key] <= 1000000
+    ) &&
+    Number.isInteger(record.customers) &&
+    Number.isInteger(record.bookings) &&
+    record.bookings <= record.customers;
+}
+
+function calculate(record) {
+  const fuel = round(record.km * 0.85);
+  const booking = record.bookings * 6;
+  const rta = record.customers * 2;
+  const deductions = round(fuel + booking + rta + record.tolls);
+
+  return {
+    fuel,
+    booking,
+    rta,
+    deductions,
+    net: round(record.meter - deductions)
+  };
+}
+
+let records = {};
+
+try {
+  const saved = JSON.parse(localStorage.getItem(KEY) || "{}");
+
+  if (!saved || typeof saved !== "object" || Array.isArray(saved)) {
+    throw new Error("Invalid data");
+  }
+
+  for (const [date, record] of Object.entries(saved)) {
+    if (!validDate(date) || !validRecord(record)) {
+      throw new Error("Invalid entry");
+    }
+  }
+
+  records = saved;
+} catch (error) {
+  $("message").textContent =
+    "Saved records could not be loaded. Restore a backup if available.";
+}
+
+function persist(next) {
+  try {
+    localStorage.setItem(KEY, JSON.stringify(next));
+    records = next;
+    return true;
+  } catch (error) {
+    $("message").textContent =
+      "Unable to save. Check browser storage settings and keep a backup.";
+    return false;
+  }
+}
+
+function readForm() {
+  return Object.fromEntries(
+    fields.map(key => [key, Number($(key).value) || 0])
+  );
+}
+
+function preview() {
+  const record = readForm();
+  const result = calculate(record);
+
+  $("fuel").textContent = money(result.fuel);
+  $("bookingFee").textContent = money(result.booking);
+  $("rta").textContent = money(result.rta);
+  $("tollFee").textContent = money(record.tolls);
+  $("deductions").textContent = money(result.deductions);
+  $("net").textContent = money(result.net);
+
+  $("dailyStatus").textContent =
+    result.net >= DAILY_TARGET
+      ? "Target reached! " + money(result.net - DAILY_TARGET) + " above target."
+      : money(DAILY_TARGET - result.net) + " below the daily target.";
+}
+
+function loadDay(date) {
+  $("date").value = date;
+  const record = records[date];
+
+  fields.forEach(key => {
+    $(key).value = record ? record[key] : key === "tolls" ? 0 : "";
+  });
+
+  $("delete").disabled = !record;
+  preview();
+  render();
+}
+
+function monthSummary() {
+  const month = $("month").value;
+  const [year, monthNumber] = month.split("-").map(Number);
+  const count = new Date(year, monthNumber, 0).getDate();
+  const now = today();
+
+  const entries = Object.entries(records)
+    .filter(([date]) => date.startsWith(month))
+    .sort(([a], [b]) => a.localeCompare(b));
+
+  const total = round(
+    entries.reduce((sum, [, record]) => sum + calculate(record).net, 0)
+  );
+
+  let elapsed = 0;
+
+  if (month < now.slice(0, 7)) {
+    elapsed = count;
+  } else if (month === now.slice(0, 7)) {
+    elapsed = Number(now.slice(8)) - 1;
+    if (records[now]) elapsed += 1;
+  }
+
+  const days = count - elapsed;
+  const target = count * DAILY_TARGET;
+  const remaining = Math.max(0, round(target - total));
+
+  return {
+    month,
+    year,
+    monthNumber,
+    count,
+    entries,
+    total,
+    target,
+    remaining,
+    days,
+    required: days ? remaining / days : 0
+  };
+}
+
+function render() {
+  if (!/^\d{4}-\d{2}$/.test($("month").value)) return;
+
+  const summary = monthSummary();
+
+  $("target").textContent = money(summary.target);
+  $("collected").textContent = money(summary.total);
+  $("remaining").textContent = money(summary.remaining);
+  $("days").textContent = summary.days;
+
+  $("required").textContent =
+    summary.remaining === 0
+      ? "Target reached!"
+      : summary.days
+        ? money(summary.required)
+        : "Month complete";
+
+  $("pace").textContent = summary.days
+    ? "Across " + summary.days + " remaining days · Base target AED 350/day"
+    : summary.remaining
+      ? money(summary.remaining) + " below the monthly target"
+      : "Monthly target achieved";
+
+  const percent = Math.max(0, summary.total / summary.target * 100);
+  $("bar").style.width = Math.min(100, percent) + "%";
+  $("progressText").textContent =
+    percent.toFixed(1) + "% of monthly target collected";
+
+  $("grossTotal").textContent = money(
+    summary.entries.reduce((sum, [, record]) => sum + record.meter, 0)
+  );
+
+  $("deductionTotal").textContent = money(
+    summary.entries.reduce(
+      (sum, [, record]) => sum + calculate(record).deductions, 0
+    )
+  );
+
+  $("achieved").textContent =
+    summary.entries.filter(
+      ([, record]) => calculate(record).net >= DAILY_TARGET
+    ).length + " / " + summary.count;
+
+  const calendar = $("calendar");
+  calendar.replaceChildren();
+
+  ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].forEach(name => {
+    const label = document.createElement("div");
+    label.className = "weekday";
+    label.textContent = name;
+    calendar.append(label);
+  });
+
+  const firstWeekday =
+    new Date(summary.year, summary.monthNumber - 1, 1).getDay();
+
+  for (let i = 0; i < firstWeekday; i++) {
+    calendar.append(document.createElement("div"));
+  }
+
+  for (let day = 1; day <= summary.count; day++) {
+    const date = summary.month + "-" + String(day).padStart(2, "0");
+    const record = records[date];
+    const result = record ? calculate(record) : null;
+    const button = document.createElement("button");
+
+    button.type = "button";
+    button.className = "day";
+
+    if (record) {
+      button.classList.add(result.net >= DAILY_TARGET ? "good" : "low");
+    }
+    if (date === $("date").value) button.classList.add("selected");
+    if (date === today()) button.classList.add("today");
+
+    button.textContent = day;
+    button.setAttribute(
+      "aria-label",
+      date + (record ? ", net " + money(result.net) : ", no entry")
+    );
+
+    const amount = document.createElement("small");
+    amount.textContent = record ? result.net.toFixed(2) : "—";
+    button.append(amount);
+
+    button.onclick = () => {
+      loadDay(date);
+      $("message").textContent = record
+        ? "Saved entry loaded. Saving will update this date."
+        : "";
+    };
+
+    calendar.append(button);
+  }
+
+  const history = $("history");
+  history.replaceChildren();
+
+  summary.entries.forEach(([date, record]) => {
+    const result = calculate(record);
+    const row = document.createElement("tr");
+
+    [
+      date,
+      record.meter.toFixed(2),
+      record.km,
+      record.customers,
+      record.bookings,
+      record.tolls.toFixed(2),
+      result.deductions.toFixed(2),
+      result.net.toFixed(2)
+    ].forEach(value => {
+      const cell = document.createElement("td");
+      cell.textContent = value;
+      row.append(cell);
+    });
+
+    history.append(row);
+  });
+
+  if (!summary.entries.length) {
+    const row = document.createElement("tr");
+    const cell = document.createElement("td");
+    cell.colSpan = 8;
+    cell.textContent = "No saved collections this month.";
+    row.append(cell);
+    history.append(row);
+  }
+}
+
+$("form").addEventListener("input", preview);
+
+$("date").addEventListener("change", () => {
+  const date = $("date").value;
+  if (!validDate(date)) return;
+  $("month").value = date.slice(0, 7);
+  loadDay(date);
+  $("message").textContent = "";
+});
+
+$("month").addEventListener("change", () => {
+  const month = $("month").value;
+  if (!month) return;
+  loadDay(month === today().slice(0, 7) ? today() : month + "-01");
+  $("message").textContent = "";
+});
+
+$("form").addEventListener("submit", event => {
+  event.preventDefault();
+
+  const date = $("date").value;
+  const record = readForm();
+
+  if (!validDate(date) || !validRecord(record)) {
+    $("message").textContent =
+      "Check your entries. Booking customers cannot exceed total customers.";
+    return;
+  }
+
+  if (date > today()) {
+    $("message").textContent =
+      "Collections can only be saved for today or past dates.";
+    return;
+  }
+
+  if (persist({ ...records, [date]: record })) {
+    $("month").value = date.slice(0, 7);
+    loadDay(date);
+    $("message").textContent = "Collection saved successfully!";
+  }
+});
+
+$("delete").onclick = () => {
+  const date = $("date").value;
+
+  if (!records[date] || !confirm("Delete collection for " + date + "?")) {
+    return;
+  }
+
+  const next = { ...records };
+  delete next[date];
+
+  if (persist(next)) {
+    loadDay(date);
+    $("message").textContent = "Collection deleted.";
+  }
+};
+
+function download(text, filename, type) {
+  const url = URL.createObjectURL(new Blob([text], { type }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+$("backup").onclick = () => {
+  download(
+    JSON.stringify({ version: 1, records }, null, 2),
+    "taxi-backup-" + today() + ".json",
+    "application/json"
+  );
+};
+
+$("restore").onclick = () => $("file").click();
+
+$("file").onchange = async () => {
+  const file = $("file").files[0];
+  if (!file) return;
+
+  try {
+    if (file.size > 5000000) throw new Error("File too large");
+
+    const data = JSON.parse(await file.text());
+
+    if (
+      data.version !== 1 ||
+      !data.records ||
+      typeof data.records !== "object" ||
+      Array.isArray(data.records)
+    ) {
+      throw new Error("Invalid backup");
+    }
+
+    for (const [date, record] of Object.entries(data.records)) {
+      if (!validDate(date) || date > today() || !validRecord(record)) {
+        throw new Error("Invalid entry");
+      }
+    }
+
+    const count = Object.keys(data.records).length;
+
+    if (confirm(
+      "Restore " + count + " entries? Matching dates will be replaced."
+    )) {
+      if (persist({ ...records, ...data.records })) {
+        loadDay($("date").value);
+        $("message").textContent = "Backup restored successfully!";
+      }
+    }
+  } catch (error) {
+    $("message").textContent =
+      "Invalid backup. Select a JSON backup downloaded from this app.";
+  } finally {
+    $("file").value = "";
+  }
+};
+
+$("csv").onclick = () => {
+  const summary = monthSummary();
+
+  const lines = [
+    "Date,Meter AED,Hired km,Customers,Bookings,Tolls AED,Fuel AED,Booking fees AED,RTA AED,Deductions AED,Net AED"
+  ];
+
+  summary.entries.forEach(([date, record]) => {
+    const result = calculate(record);
+    lines.push([
+      date,
+      record.meter,
+      record.km,
+      record.customers,
+      record.bookings,
+      record.tolls,
+      result.fuel,
+      result.booking,
+      result.rta,
+      result.deductions,
+      result.net
+    ].join(","));
+  });
+
+  download(
+    lines.join("\r\n"),
+    "taxi-" + summary.month + ".csv",
+    "text/csv"
+  );
+};
+
+$("date").max = today();
+$("month").value = today().slice(0, 7);
+loadDay(today());
+
+setInterval(() => {
+  $("date").max = today();
+  render();
+}, 60000);
+</script>
+</body>
+</html>
