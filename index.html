@@ -853,14 +853,31 @@ const receiptIds=["receiptShift","receiptCareem","receiptKm","receiptTrips","rec
 let receiptBusy=false,receiptUrl=null,ocrLoad=null;
 function parseReceipt(text){
   const result={};
-  const labels={receiptShift:/^shift\s+total\b/i,receiptCareem:/^paid\s+in\s+careem\b/i,receiptKm:/^kilometers?\s+hired\b|^kilometres?\s+hired\b/i,receiptTrips:/^shift\s+trips\b/i,receiptBookings:/^bookings\b/i,receiptTolls:/^total\s+tollways?\b/i};
-  for(const line of text.split(/\r?\n/)){
-    const clean=line.trim();
-    for(const [key,label] of Object.entries(labels)){
-      if(!label.test(clean))continue;
-      const tail=clean.replace(label,"").replace(/\bAED\b|\bKM\b/gi,"").replace(/^[\s:;|]+/,"").trim();
-      const m=tail.match(/^([0-9]+(?:,[0-9]{3})*(?:\.[0-9]{1,2})?)(?:\s|$)/);
-      if(m){const n=Number(m[1].replace(/,/g,""));if(Number.isFinite(n)&&n<=1000000&&!Object.hasOwn(result,key))result[key]=n;}
+  const labels={receiptShift:["shifttotal"],receiptCareem:["paidincareem"],receiptKm:["kilometershired","kilometreshired"],receiptTrips:["shifttrips"],receiptBookings:["bookings"],receiptTolls:["totaltollways"]};
+  function distance(a,b){
+    let prev=Array.from({length:b.length+1},(_,i)=>i);
+    for(let i=1;i<=a.length;i++){const next=[i];for(let j=1;j<=b.length;j++)next[j]=Math.min(next[j-1]+1,prev[j]+1,prev[j-1]+(a[i-1]===b[j-1]?0:1));prev=next;}
+    return prev[b.length];
+  }
+  const lines=text.split(/\r?\n/);
+  for(let i=0;i<lines.length;i++){
+    let line=lines[i].trim();
+    // Amount at end of a line; tolerate OCR currency, separators, comma decimals and units.
+    let m=line.match(/([0-9]+(?:[.,][0-9]+)*)(?:\s*(?:k[mn]|km\/h))?\s*[|:;]*\s*$/i);
+    if(!m)continue;
+    const rawLabel=line.slice(0,m.index).replace(/\b[A-Z]{2,3}\s*$/i,"").replace(/[^\w]/g,"").toLowerCase().replace(/0/g,"o").replace(/2/g,"b");
+    if(/discount/.test(rawLabel)||/scountedtrips/.test(rawLabel))continue;
+    for(const [key,names] of Object.entries(labels)){
+      const match=names.some(name=>{
+        const max=name.length>=12?3:2;
+        return distance(rawLabel,name)<=max||distance(rawLabel.slice(-name.length),name)<=max;
+      });
+      if(!match||Object.hasOwn(result,key))continue;
+      let num=m[1];
+      if(/^\d+,\d{1,2}$/.test(num))num=num.replace(",",".");
+      else num=num.replace(/,/g,"");
+      const n=Number(num);
+      if(Number.isFinite(n)&&n<=1000000)result[key]=n;
     }
   }
   return result;
@@ -904,6 +921,7 @@ async function scanReceipt(input){
     const scale=Math.min(2,2400/Math.max(image.naturalWidth,image.naturalHeight));
     canvas.width=Math.round(image.naturalWidth*scale);canvas.height=Math.round(image.naturalHeight*scale);
     const ctx=canvas.getContext("2d");ctx.filter="grayscale(1) contrast(1.3)";ctx.drawImage(image,0,0,canvas.width,canvas.height);
+    await worker.setParameters({tessedit_pageseg_mode:"6"});
     const {data}=await worker.recognize(canvas);
     const values=parseReceipt(data.text);
     receiptIds.forEach(id=>$(id).value=values[id]??"");
