@@ -863,8 +863,10 @@ function parseReceipt(text){
   for(let i=0;i<lines.length;i++){
     let line=lines[i].trim();
     // Amount at end of a line; tolerate OCR currency, separators, comma decimals and units.
-    let m=line.match(/([0-9]+(?:[.,][0-9]+)*)(?:\s*(?:k[mn]|km\/h))?\s*[|:;]*\s*$/i);
-    if(!m)continue;
+    const candidates=[...line.matchAll(/[0-9]+(?:[.,][0-9]+)*/g)];
+    if(!candidates.length)continue;
+    // Ignore stray letters/punctuation after the value, while preserving label digits.
+    let m=candidates[candidates.length-1];
     const rawLabel=line.slice(0,m.index).replace(/\b[A-Z]{2,3}\s*$/i,"").replace(/[^\w]/g,"").toLowerCase().replace(/0/g,"o").replace(/2/g,"b");
     if(/discount/.test(rawLabel)||/scountedtrips/.test(rawLabel))continue;
     for(const [key,names] of Object.entries(labels)){
@@ -873,7 +875,7 @@ function parseReceipt(text){
         return distance(rawLabel,name)<=max||distance(rawLabel.slice(-name.length),name)<=max;
       });
       if(!match||Object.hasOwn(result,key))continue;
-      let num=m[1];
+      let num=m[0];
       if(/^\d+,\d{1,2}$/.test(num))num=num.replace(",",".");
       else num=num.replace(/,/g,"");
       const n=Number(num);
@@ -921,13 +923,39 @@ async function scanReceipt(input){
     const scale=Math.min(2,2400/Math.max(image.naturalWidth,image.naturalHeight));
     canvas.width=Math.round(image.naturalWidth*scale);canvas.height=Math.round(image.naturalHeight*scale);
     const ctx=canvas.getContext("2d");ctx.filter="grayscale(1) contrast(1.3)";ctx.drawImage(image,0,0,canvas.width,canvas.height);
-    await worker.setParameters({tessedit_pageseg_mode:"6"});
-    const {data}=await worker.recognize(canvas);
-    const values=parseReceipt(data.text);
-    receiptIds.forEach(id=>$(id).value=values[id]??"");
+    const votes=Object.fromEntries(receiptIds.map(id=>[id,[]]));
+    async function readPass(source,mode,label){
+      $("receiptStatus").textContent=label;
+      await worker.setParameters({tessedit_pageseg_mode:String(mode)});
+      const {data}=await worker.recognize(source);
+      const found=parseReceipt(data.text);
+      receiptIds.forEach(id=>{if(found[id]!==undefined)votes[id].push(found[id]);});
+    }
+    await readPass(canvas,6,"Reading receipt: first pass…");
+    // A different layout mode resolves lines with trailing noise or separated columns.
+    ctx.filter="grayscale(1)";ctx.drawImage(image,0,0,canvas.width,canvas.height);
+    await readPass(canvas,4,"Checking receipt: second pass…");
+    // Overlapping shorter strips reduce skew and improve small receipt text.
+    const strip=document.createElement("canvas");
+    strip.width=canvas.width;
+    for(const [top,bottom] of [[0.20,0.65],[0.50,0.90]]){
+      strip.height=Math.round(canvas.height*(bottom-top));
+      const sc=strip.getContext("2d");sc.fillStyle="white";sc.fillRect(0,0,strip.width,strip.height);
+      sc.drawImage(canvas,0,Math.round(canvas.height*top),canvas.width,strip.height,0,0,strip.width,strip.height);
+      await readPass(strip,6,"Checking receipt details…");
+    }
+    const values={};
+    receiptIds.forEach(id=>{
+      const counts=new Map();
+      votes[id].forEach(n=>counts.set(n,(counts.get(n)||0)+1));
+      const ranked=[...counts].sort((a,b)=>b[1]-a[1]);
+      // Conflicting readings need manual review rather than silently choosing a number.
+      if(ranked.length===1||(ranked.length>1&&ranked[0][1]>ranked[1][1]))values[id]=ranked[0][0];
+      $(id).value=values[id]??"";
+    });
     const missing=receiptIds.filter(id=>values[id]===undefined).length;
     $("receiptStatus").textContent=missing
-      ?"Some values could not be read. Fill the blank fields and check every number against the receipt."
+      ?"Some values were missing or disagreed between scans. Fill the blank fields and check every number against the receipt."
       :"Summary read. Check every number against the photo before using these values.";
   }catch(error){
     $("receiptStatus").textContent="Photo could not be read. Try a clearer JPG/PNG photo, check your internet connection, or enter the values manually.";
