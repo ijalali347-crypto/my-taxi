@@ -111,7 +111,9 @@ main{padding:14px}
 <p id="receiptStatus" role="status" aria-live="polite"></p>
 <section id="receiptReview" hidden>
 <div class="fields">
-<label>Receipt Shift Total — AED<input id="receiptShift" type="number" min="0" max="1000000" step="0.01"></label>
+<label>Total Amount — AED<input id="receiptTotal" type="number" min="0" max="1000000" step="0.01"></label>
+<label>Shift Discount — AED<input id="receiptDiscount" type="number" min="0" max="1000000" step="0.01"></label>
+<label>Receipt Shift Total (after discount) — AED<input id="receiptShift" type="number" min="0" max="1000000" step="0.01"></label>
 <label>Paid in Careem — AED<input id="receiptCareem" type="number" min="0" max="1000000" step="0.01"></label>
 <label>Hired kilometres<input id="receiptKm" type="number" min="0" max="1000000" step="0.01"></label>
 <label>Shift trips<input id="receiptTrips" type="number" min="0" max="1000000" step="1"></label>
@@ -119,7 +121,7 @@ main{padding:14px}
 <label>Total tollways — AED<input id="receiptTolls" type="number" min="0" max="1000000" step="0.01"></label>
 </div>
 <p><strong id="receiptCombined"></strong></p>
-<small>Only Shift Total + Paid in Careem form the collection. Discounted trips are already included in Shift Trips. Other receipt amounts are not added again. Select the correct collection date below.</small>
+<small>Collection = Total Amount + Paid in Careem. If Total Amount is blank, enter Shift Total and Shift Discount instead. The discount is included only once. Discounted trips are already included in Shift Trips. Other receipt amounts are not added again. Select the correct collection date below.</small>
 <p><button type="button" id="applyReceipt">Use reviewed values</button><button type="button" class="secondary" id="manualReceipt">Enter manually</button></p>
 </section>
 </div>
@@ -129,7 +131,7 @@ main{padding:14px}
 <small>Save the non-working day to remove its daily target. Missing entries still count toward the target.</small>
 
 <div class="fields">
-<label>Total shift collection (including Careem) — AED
+<label>Total collection (before discount, including Careem) — AED
 <input type="number" id="meter" min="0" step="0.01" required>
 </label>
 
@@ -849,11 +851,11 @@ $("month").value = today().slice(0, 7);
 loadDay(today());
 
 
-const receiptIds=["receiptShift","receiptCareem","receiptKm","receiptTrips","receiptBookings","receiptTolls"];
+const receiptIds=["receiptTotal","receiptDiscount","receiptShift","receiptCareem","receiptKm","receiptTrips","receiptBookings","receiptTolls"];
 let receiptBusy=false,receiptUrl=null,ocrLoad=null;
 function parseReceipt(text){
   const result={};
-  const labels={receiptShift:["shifttotal"],receiptCareem:["paidincareem"],receiptKm:["kilometershired","kilometreshired"],receiptTrips:["shifttrips"],receiptBookings:["bookings"],receiptTolls:["totaltollways"]};
+  const labels={receiptTotal:["totalamount"],receiptDiscount:["shiftdiscount"],receiptShift:["shifttotal"],receiptCareem:["paidincareem"],receiptKm:["kilometershired","kilometreshired"],receiptTrips:["shifttrips"],receiptBookings:["bookings"],receiptTolls:["totaltollways"]};
   function distance(a,b){
     let prev=Array.from({length:b.length+1},(_,i)=>i);
     for(let i=1;i<=a.length;i++){const next=[i];for(let j=1;j<=b.length;j++)next[j]=Math.min(next[j-1]+1,prev[j]+1,prev[j-1]+(a[i-1]===b[j-1]?0:1));prev=next;}
@@ -868,7 +870,8 @@ function parseReceipt(text){
     // Ignore stray letters/punctuation after the value, while preserving label digits.
     let m=candidates[candidates.length-1];
     const rawLabel=line.slice(0,m.index).replace(/\b[A-Z]{2,3}\s*$/i,"").replace(/[^\w]/g,"").toLowerCase().replace(/0/g,"o").replace(/2/g,"b");
-    if(/discount/.test(rawLabel)||/scountedtrips/.test(rawLabel))continue;
+    if(/discount/.test(rawLabel)&&!/^shiftdiscount$/.test(rawLabel))continue;
+    if(/scountedtrips/.test(rawLabel))continue;
     for(const [key,names] of Object.entries(labels)){
       const match=names.some(name=>{
         const max=name.length>=12?3:2;
@@ -884,9 +887,17 @@ function parseReceipt(text){
   }
   return result;
 }
+function receiptBase(){
+  if($("receiptTotal").value!=="")return Number($("receiptTotal").value);
+  if($("receiptShift").value!==""&&$("receiptDiscount").value!=="")
+    return round(Number($("receiptShift").value)+Number($("receiptDiscount").value));
+  return null;
+}
 function receiptSum(){
-  const a=$("receiptShift").value,b=$("receiptCareem").value;
-  $("receiptCombined").textContent=a!==""&&b!==""?"Combined collection: "+money(round(Number(a)+Number(b))):"Enter both amounts to calculate the combined collection.";
+  const base=receiptBase(),careem=$("receiptCareem").value;
+  $("receiptCombined").textContent=base!==null&&careem!==""
+    ?"Combined collection: "+money(round(base+Number(careem)))
+    :"Enter Total Amount (or Shift Total and Shift Discount) and Paid in Careem.";
 }
 receiptIds.forEach(id=>$(id).addEventListener("input",receiptSum));
 function loadOCR(){
@@ -953,7 +964,7 @@ async function scanReceipt(input){
       if(ranked.length===1||(ranked.length>1&&ranked[0][1]>ranked[1][1]))values[id]=ranked[0][0];
       $(id).value=values[id]??"";
     });
-    const missing=receiptIds.filter(id=>values[id]===undefined).length;
+    const missing=receiptIds.filter(id=>!["receiptTotal","receiptDiscount","receiptShift"].includes(id)&&values[id]===undefined).length + (receiptBase()===null?1:0);
     $("receiptStatus").textContent=missing
       ?"Some values were missing or disagreed between scans. Fill the blank fields and check every number against the receipt."
       :"Summary read. Check every number against the photo before using these values.";
@@ -969,20 +980,22 @@ $("takeReceipt").onclick=()=>$("receiptCamera").click();
 $("uploadReceipt").onclick=()=>$("receiptUpload").click();
 $("receiptCamera").onchange=()=>scanReceipt($("receiptCamera"));
 $("receiptUpload").onchange=()=>scanReceipt($("receiptUpload"));
-$("manualReceipt").onclick=()=>{$("meter").focus();$("message").textContent="Enter your combined Shift Total + Paid in Careem and the other values manually.";};
+$("manualReceipt").onclick=()=>{$("meter").focus();$("message").textContent="Enter your Total Amount + Paid in Careem (or Shift Total + Shift Discount + Paid in Careem) and the other values manually.";};
 $("applyReceipt").onclick=()=>{
-  const names={receiptShift:"Shift Total",receiptCareem:"Paid in Careem",receiptKm:"Hired kilometres",receiptTrips:"Shift trips",receiptBookings:"Bookings",receiptTolls:"Total tollways"};
+  const names={receiptTotal:"Total Amount",receiptDiscount:"Shift Discount",receiptShift:"Shift Total",receiptCareem:"Paid in Careem",receiptKm:"Hired kilometres",receiptTrips:"Shift trips",receiptBookings:"Bookings",receiptTolls:"Total tollways"};
   function showReceiptError(text,id){
     $("receiptStatus").textContent=text;
     $("message").textContent=text;
     if(id){$(id).focus();$(id).scrollIntoView({behavior:"smooth",block:"center"});}
   }
-  const missing=receiptIds.filter(id=>$(id).value.trim()==="");
+  const required=receiptIds.filter(id=>!["receiptTotal","receiptDiscount","receiptShift"].includes(id));
+  if($("receiptTotal").value.trim()==="")required.push("receiptShift","receiptDiscount");
+  const missing=required.filter(id=>$(id).value.trim()==="");
   if(missing.length){
     showReceiptError("Please enter "+missing.map(id=>names[id]).join(", ")+". The photo reader left these blank. Enter 0 only if the receipt shows zero.",missing[0]);return;
   }
   const values=Object.fromEntries(receiptIds.map(id=>[id,Number($(id).value)]));
-  const invalid=receiptIds.find(id=>!Number.isFinite(values[id])||values[id]<0||values[id]>1000000);
+  const invalid=receiptIds.find(id=>$(id).value.trim()!==""&&(!Number.isFinite(values[id])||values[id]<0||values[id]>1000000));
   if(invalid){showReceiptError("Check "+names[invalid]+": enter a number from 0 to 1,000,000.",invalid);return;}
   for(const id of ["receiptTrips","receiptBookings"]){
     if(!Number.isInteger(values[id])){showReceiptError(names[id]+" must be a whole number.",id);return;}
@@ -990,7 +1003,7 @@ $("applyReceipt").onclick=()=>{
   if(values.receiptBookings>values.receiptTrips){
     showReceiptError("Bookings cannot exceed Shift Trips. Check both numbers.", "receiptBookings");return;
   }
-  const record={meter:round(values.receiptShift+values.receiptCareem),km:round(values.receiptKm),customers:values.receiptTrips,bookings:values.receiptBookings,tolls:round(values.receiptTolls),status:"working"};
+  const record={meter:round(receiptBase()+values.receiptCareem),km:round(values.receiptKm),customers:values.receiptTrips,bookings:values.receiptBookings,tolls:round(values.receiptTolls),status:"working"};
   if(!validRecord(record)){showReceiptError("Check the combined collection amount. It cannot exceed 1,000,000.", "receiptShift");return;}
   $("dayStatus").value="working";
   fields.forEach(id=>{$(id).disabled=false;$(id).value=record[id];});
