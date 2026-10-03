@@ -932,7 +932,7 @@ async function scanReceipt(input){
   }catch(error){
     $("receiptStatus").textContent="Photo could not be read. Try a clearer JPG/PNG photo, check your internet connection, or enter the values manually.";
   }finally{
-    if(worker)await worker.terminate().catch(()=>{});
+    if(worker)worker.terminate().catch(()=>{});
     receiptBusy=false;["takeReceipt","uploadReceipt","applyReceipt"].forEach(id=>$(id).disabled=false);
     $("receiptReview").hidden=false;receiptSum();
   }
@@ -943,18 +943,34 @@ $("receiptCamera").onchange=()=>scanReceipt($("receiptCamera"));
 $("receiptUpload").onchange=()=>scanReceipt($("receiptUpload"));
 $("manualReceipt").onclick=()=>{$("meter").focus();$("message").textContent="Enter your combined Shift Total + Paid in Careem and the other values manually.";};
 $("applyReceipt").onclick=()=>{
-  if(receiptIds.some(id=>$(id).value===""||!$(id).checkValidity())){
-    $("receiptStatus").textContent="Fill every receipt field with a valid value; use 0 only when the receipt shows zero.";return;
+  const names={receiptShift:"Shift Total",receiptCareem:"Paid in Careem",receiptKm:"Hired kilometres",receiptTrips:"Shift trips",receiptBookings:"Bookings",receiptTolls:"Total tollways"};
+  function showReceiptError(text,id){
+    $("receiptStatus").textContent=text;
+    $("message").textContent=text;
+    if(id){$(id).focus();$(id).scrollIntoView({behavior:"smooth",block:"center"});}
+  }
+  const missing=receiptIds.filter(id=>$(id).value.trim()==="");
+  if(missing.length){
+    showReceiptError("Please enter "+missing.map(id=>names[id]).join(", ")+". The photo reader left these blank. Enter 0 only if the receipt shows zero.",missing[0]);return;
   }
   const values=Object.fromEntries(receiptIds.map(id=>[id,Number($(id).value)]));
-  const record={meter:round(values.receiptShift+values.receiptCareem),km:values.receiptKm,customers:values.receiptTrips,bookings:values.receiptBookings,tolls:values.receiptTolls,status:"working"};
-  if(!validRecord(record)){$("receiptStatus").textContent="Check the values. Bookings cannot exceed shift trips, and trips must be whole numbers.";return;}
+  const invalid=receiptIds.find(id=>!Number.isFinite(values[id])||values[id]<0||values[id]>1000000);
+  if(invalid){showReceiptError("Check "+names[invalid]+": enter a number from 0 to 1,000,000.",invalid);return;}
+  for(const id of ["receiptTrips","receiptBookings"]){
+    if(!Number.isInteger(values[id])){showReceiptError(names[id]+" must be a whole number.",id);return;}
+  }
+  if(values.receiptBookings>values.receiptTrips){
+    showReceiptError("Bookings cannot exceed Shift Trips. Check both numbers.", "receiptBookings");return;
+  }
+  const record={meter:round(values.receiptShift+values.receiptCareem),km:round(values.receiptKm),customers:values.receiptTrips,bookings:values.receiptBookings,tolls:round(values.receiptTolls),status:"working"};
+  if(!validRecord(record)){showReceiptError("Check the combined collection amount. It cannot exceed 1,000,000.", "receiptShift");return;}
   $("dayStatus").value="working";
-  fields.forEach(id=>$(id).value=record[id]);
+  fields.forEach(id=>{$(id).disabled=false;$(id).value=record[id];});
   preview();
-  $("message").textContent="Reviewed values applied. Check the date, then tap Save collection.";
-  $("receiptStatus").textContent="Applied "+money(record.meter)+" collection. Not saved yet.";
-  $("date").scrollIntoView({behavior:"smooth",block:"center"});
+  $("message").textContent="✓ Values filled in. Check the date and tap Save collection below.";
+  $("receiptStatus").textContent="✓ Applied "+money(record.meter)+" to the collection form. Tap Save collection to save it.";
+  $("receiptReview").hidden=true;
+  $("form").scrollIntoView({behavior:"smooth",block:"start"});
 };
 
 setInterval(() => {
