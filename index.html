@@ -79,6 +79,7 @@ main{padding:14px}
 <section class="panel" id="installPanel" style="margin:18px 0">
 <div class="row"><img src="./icons/taxi-192.png" width="52" height="52" alt="" style="border-radius:12px"><div style="flex:1"><strong>Install My Taxi</strong><p id="installHelp" class="muted" style="margin:6px 0">Install on your phone to open in its own app window.</p></div><button type="button" id="installApp">Install app</button></div>
 </section>
+<section class="panel" style="margin:18px 0"><h2>Saved data and recovery</h2><p id="storageNotice" role="status" aria-live="polite"></p><p class="muted">Check your company, vehicle, shift and View month. Records are separate for each profile. Open this app in the same browser where you saved them.</p><div id="storedProfiles"></div><div class="row"><button type="button" class="secondary" id="recoverLocal">Recover missing days</button><button type="button" class="secondary" id="exportRaw">Download device recovery data</button></div><p class="muted">Download backup regularly. Device recovery copies do not protect against clearing browser data or losing this phone.</p></section>
 <label>View month
 <input type="month" id="month">
 </label>
@@ -339,37 +340,93 @@ function calculate(record) {
 }
 
 let records = {};
-
-try {
-  const saved = JSON.parse(localStorage.getItem(KEY) || "{}");
-
-  if (!saved || typeof saved !== "object" || Array.isArray(saved)) {
-    throw new Error("Invalid data");
+let storageBlocked=false,loadedRaw=null;
+const COPY_KEY=KEY+"-recovery-copy";
+const PREVIOUS_KEY=KEY+"-previous-copy";
+function inspectStored(raw){
+  const valid={},invalid=[];
+  if(raw===null)return {valid,invalid};
+  let data;
+  try{data=JSON.parse(raw);}catch(error){return {valid,invalid:["Unreadable saved data"]};}
+  if(!data||typeof data!=="object"||Array.isArray(data))return {valid,invalid:["Unexpected saved data format"]};
+  for(const [date,record] of Object.entries(data)){
+    if(validDate(date)&&validRecord(record))valid[date]=record;
+    else invalid.push(date);
   }
-
-  for (const [date, record] of Object.entries(saved)) {
-    if (!validDate(date) || !validRecord(record)) {
-      throw new Error("Invalid entry");
-    }
-  }
-
-  records = saved;
-} catch (error) {
-  $("message").textContent =
-    "Saved records could not be loaded. Restore a backup if available.";
+  return {valid,invalid};
 }
-
+try{
+  loadedRaw=localStorage.getItem(KEY);
+  const found=inspectStored(loadedRaw);
+  records=found.valid;
+  storageBlocked=found.invalid.length>0;
+  if(storageBlocked)$("storageNotice").textContent="Some saved entries could not be loaded. Valid days are displayed. Saving is blocked to protect the original data. Download device recovery data.";
+}catch(error){
+  storageBlocked=true;
+  $("storageNotice").textContent="Cannot access this browser's saved data. Saving is blocked. Use the original browser and check its storage settings.";
+}
+function storageInventory(){
+  const list=$("storedProfiles");list.replaceChildren();
+  try{
+    const keys=Object.keys(localStorage).filter(k=>/^taxi-collection/.test(k)&&!/-recovery-copy$|-previous-copy$/.test(k));
+    for(const key of keys){
+      const found=inspectStored(localStorage.getItem(key)),dates=Object.keys(found.valid).sort();
+      const p=document.createElement("p");
+      p.textContent=key.replace("taxi-collection","Profile")+" — "+dates.length+" saved days"+(dates.length?" ("+dates[0]+" to "+dates.at(-1)+")":"")+(found.invalid.length?" · unreadable entries: "+found.invalid.length:"");
+      list.append(p);
+    }
+    if(!storageBlocked)$("storageNotice").textContent=Object.keys(records).length+" saved days in the selected profile. "+(Object.keys(records).length?"Choose View month to see earlier records.":"Check other profiles below or try Recover missing days.");
+  }catch(error){$("storageNotice").textContent="Unable to inspect device storage.";}
+}
 function persist(next) {
-  try {
-    localStorage.setItem(KEY, JSON.stringify(next));
-    records = next;
+  if(storageBlocked){
+    $("message").textContent="Saving blocked to protect unreadable data. Download device recovery data first.";
+    return false;
+  }
+  try{
+    const current=localStorage.getItem(KEY);
+    if(current!==loadedRaw){
+      $("message").textContent="Saved data changed in another app window. Reopen this app before saving to avoid overwriting those changes.";
+      return false;
+    }
+    const text=JSON.stringify(next);
+    // Preserve the previous state before touching the primary copy.
+    if(current!==null)localStorage.setItem(PREVIOUS_KEY,current);
+    localStorage.setItem(COPY_KEY,text);
+    localStorage.setItem(KEY,text);
+    loadedRaw=text;records=next;
+    storageInventory();
     return true;
-  } catch (error) {
-    $("message").textContent =
-      "Unable to save. Check browser storage settings and keep a backup.";
+  }catch(error){
+    $("message").textContent="Unable to finish saving. Download a backup and check browser storage. A recovery copy may be available.";
     return false;
   }
 }
+$("exportRaw").onclick=()=>{
+  try{
+    const data={exportedAt:new Date().toISOString(),selectedProfile:KEY,storage:{}};
+    Object.keys(localStorage).filter(k=>k.startsWith("taxi-collection")).forEach(k=>data.storage[k]=localStorage.getItem(k));
+    download(JSON.stringify(data,null,2),"taxi-device-recovery-"+today()+".json","application/json");
+  }catch(error){$("storageNotice").textContent="Unable to export device storage.";}
+};
+$("recoverLocal").onclick=()=>{
+  if(storageBlocked){$("storageNotice").textContent="Original data has unreadable entries. Download device recovery data so it can be repaired without overwriting it.";return;}
+  try{
+    // Latest recovery copy has priority; older copy supplies missing dates only.
+    const older=inspectStored(localStorage.getItem(PREVIOUS_KEY)).valid;
+    const latest=inspectStored(localStorage.getItem(COPY_KEY)).valid;
+    const combined={...older,...latest,...records};
+    const missing=Object.keys(combined).filter(d=>!Object.hasOwn(records,d));
+    if(!missing.length){$("storageNotice").textContent="No additional days found in this profile's recovery copies. Check the original browser, company, vehicle, shift and month, or your downloaded backups.";return;}
+    if(!confirm("Recover "+missing.length+" missing days for this profile? Previously deleted days may be included. Existing days will stay unchanged."))return;
+    if(persist(combined)){
+      const last=Object.keys(combined).sort().at(-1);
+      $("month").value=last.slice(0,7);loadDay(last);
+      $("storageNotice").textContent="Recovered "+missing.length+" missing days. Download backup now.";
+    }
+  }catch(error){$("storageNotice").textContent="Unable to read recovery copies.";}
+};
+storageInventory();
 
 function readForm() {
   const status=$("dayStatus").value;
