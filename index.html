@@ -132,7 +132,7 @@ main{padding:14px}
 <small>Save the non-working day to remove its daily target. Missing entries still count toward the target.</small>
 
 <div class="fields">
-<label>Total collection (before discount, including Careem) — AED
+<label>Total money (before discount, including Careem and POS tips) — AED
 <input type="number" id="meter" min="0" step="0.01" required>
 </label>
 
@@ -153,9 +153,11 @@ main{padding:14px}
 </label>
 </div>
 
-<label>POS tips — AED<input type="number" id="posTips" min="0" max="1000000" step="0.01" value="0" required></label><small>POS tips are saved for this date and added to the separate monthly tips total. They do not affect collection, deductions, targets or commission.</small><p><small>Booking customers must also be included in total customers.</small></p>
+<label>POS tips — AED<input type="number" id="posTips" min="0" max="1000000" step="0.01" value="0" required></label><small>POS tips are already included in Total money above. They are subtracted once to get your taxi collection and saved separately as monthly tips.</small><p><small>Booking customers must also be included in total customers.</small></p>
 
 <div class="breakdown">
+<p><span>POS tips removed from total money</span><span id="removedPosTips"></span></p>
+<p><span>Collection excluding POS tips</span><span id="collectionWithoutTips"></span></p>
 <p><span><span id="fuelLabel">Fuel</span></span><span id="fuel"></span></p>
 <p><span><span id="bookingLabel">Bookings</span></span><span id="bookingFee"></span></p>
 <p><span>RTA: AED 2 per customer</span><span id="rta"></span></p>
@@ -233,7 +235,7 @@ Past days without entries count as elapsed days.
 <table>
 <thead>
 <tr>
-<th>Date</th><th>Status</th><th>Collection</th><th>Hired km</th>
+<th>Date</th><th>Status</th><th>Total money incl. tips</th><th>Hired km</th>
 <th>Customers</th><th>Bookings</th><th>Tolls</th>
 <th>Deductions</th><th>Net AED</th><th>POS tips AED</th>
 </tr>
@@ -337,7 +339,8 @@ function calculate(record) {
     booking,
     rta,
     deductions,
-    net: round(record.meter - deductions)
+    collection: round(record.meter-(record.posTips??0)),
+    net: round(record.meter-(record.posTips??0)-deductions)
   };
 }
 
@@ -446,7 +449,7 @@ function dailyPlan(date, allRecords, configuration, enteredNet, status="working"
   const prefix=date.slice(0,7);
   const prior=round(Object.entries(allRecords)
     .filter(([d,r])=>d.startsWith(prefix)&&d<date&&!isOff(r))
-    .reduce((sum,[,r])=>sum+round(r.meter-round(round(r.km*configuration.fuel)+r.bookings*configuration.booking+r.customers*configuration.rta+r.tolls)),0));
+    .reduce((sum,[,r])=>sum+round(r.meter-(r.posTips??0)-round(round(r.km*configuration.fuel)+r.bookings*configuration.booking+r.customers*configuration.rta+r.tolls)),0));
   const total=round(prior+enteredNet);
   const excluded=Object.entries(allRecords).filter(([d,r])=>d.startsWith(prefix)&&d!==date&&isOff(r));
   const currentOff=status!=="working";
@@ -477,6 +480,8 @@ function preview() {
   const result = calculate(record);
   updateDailyPlan(result.net);
 
+  $("removedPosTips").textContent=money(record.posTips??0);
+  $("collectionWithoutTips").textContent=money(result.collection??0);
   $("fuel").textContent = money(result.fuel);
   $("bookingFee").textContent = money(result.booking);
   $("rta").textContent = money(result.rta);
@@ -613,7 +618,7 @@ function render() {
     percent.toFixed(1) + "% of monthly target collected";
 
   $("grossTotal").textContent = money(
-    summary.entries.reduce((sum, [, record]) => sum + record.meter, 0)
+    summary.entries.reduce((sum, [, record]) => sum + record.meter-(record.posTips??0), 0)
   );
 
   $("deductionTotal").textContent = money(
@@ -745,6 +750,8 @@ $("form").addEventListener("submit", event => {
     return;
   }
 
+  if((record.posTips??0)>record.meter){$("message").textContent="POS tips cannot exceed Total money. Enter the total including tips.";return;}
+
   if (date > today()) {
     $("message").textContent =
       "Collections can only be saved for today or past dates.";
@@ -849,7 +856,7 @@ $("csv").onclick = () => {
   const summary = monthSummary();
 
   const lines = [
-    "Date,Status,Meter AED,Hired km,Customers,Bookings,Tolls AED,Fuel AED,Booking fees AED,RTA AED,Deductions AED,Net AED,POS tips AED"
+    "Date,Status,Meter AED,Hired km,Customers,Bookings,Tolls AED,Fuel AED,Booking fees AED,RTA AED,Deductions AED,Net AED,POS tips AED,Collection excluding POS tips AED"
   ];
 
   summary.entries.forEach(([date, record]) => {
@@ -867,7 +874,8 @@ $("csv").onclick = () => {
       result.rta,
       result.deductions,
       result.net,
-      record.posTips??0
+      record.posTips??0,
+      result.collection??0
     ].join(","));
   });
 
