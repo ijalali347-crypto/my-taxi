@@ -222,6 +222,37 @@ Past days without entries count as elapsed days.
 <details><summary>Commission tiers</summary><p>AED 350 or more/day: 35% driver · 65% company<br>AED 300 to below 350: 30% · 70%<br>AED 275 to below 300: 25% · 75%<br>AED 250 to below 275: 20% · 80%<br>AED 200 to below 250: 15% · 85%<br>Below AED 200: 10% · 90%</p></details>
 </section>
 
+<section class="panel history" id="partnershipSection">
+<h2>🤝 Driver Partnership</h2>
+<p class="muted">Find a driver living nearby who works the opposite shift. Listings are public to everyone in the taxi app. Your area and phone number appear only when you post here.</p>
+<div class="fields">
+<label>Search area<input id="partnerSearch" type="search" placeholder="Deira, Al Nahda…"></label>
+<label>Show shift<select id="partnerFilter"><option value="">Day and night</option><option value="day">Day shift</option><option value="night">Night shift</option></select></label>
+</div>
+<div class="row"><button type="button" id="refreshPartners" class="secondary">Refresh drivers</button><button type="button" id="morePartners" class="secondary" hidden>Load more</button></div>
+<p id="partnerListStatus" role="status" aria-live="polite"></p>
+<div id="partnerList" style="display:grid;gap:12px;margin:16px 0"></div>
+<details id="partnerDetails"><summary><strong>Add or manage your availability</strong></summary>
+<p class="muted">One listing per editing key. Use your area, not your full home address. Available listings expire after 30 days; update yours to renew it. Mark it “Partner found” to hide it.</p>
+<form id="partnerForm">
+<div class="fields">
+<label>Your name<input id="partnerName" maxlength="60" required autocomplete="name"></label>
+<label>Area where you live<input id="partnerArea" maxlength="100" minlength="2" required placeholder="For example: Al Nahda, Dubai"></label>
+<label>Your work shift<select id="partnerShift"><option value="day">Day shift</option><option value="night">Night shift</option></select></label>
+<label>Taxi company<select id="partnerCompany"><option value="arabia">Arabia Taxi</option><option value="dtc">DTC</option><option value="kabi">KABI Taxi</option></select></label>
+<label>Phone / WhatsApp<input id="partnerPhone" type="tel" required pattern="\+[0-9]{8,15}" placeholder="+971501234567" autocomplete="tel"></label>
+<label>Availability<select id="partnerAvailability"><option value="available">Looking for a partner</option><option value="matched">Partner found — hide listing</option></select></label>
+</div>
+<label><input id="partnerConsent" type="checkbox" required style="display:inline;width:auto;margin-right:8px">I choose to share my name, area, shift and phone publicly with everyone viewing these listings.</label>
+<div class="row"><button type="submit" id="postPartner">Post / update listing</button><button type="button" class="danger" id="removePartner" hidden>Remove my listing</button></div>
+</form>
+<p id="partnerFormStatus" role="status" aria-live="polite"></p>
+<p class="muted">Manage your listing on this browser/device. Save your private editing key below to manage it if you change phones or clear browser data. Never share that key with other drivers.</p>
+<div class="row"><button type="button" class="secondary" id="savePartnerKey">Download editing key</button><button type="button" class="secondary" id="restorePartnerKey">Restore editing key</button></div>
+<input id="partnerKeyFile" type="file" accept=".json,application/json" hidden>
+</details>
+</section>
+
 <section class="panel history">
 <h2>Saved collections</h2>
 <div class="row">
@@ -1162,5 +1193,125 @@ setInterval(() => {
   };
 })();
 </script>
+
+<script>
+(function(){
+"use strict";
+const endpoint="https://khzqerdrhzdrkhdxfaxn.supabase.co/functions/v1/taxi-partnership";
+const keyName="taxi-partnership-edit-key-v1";
+const el=id=>document.getElementById(id);
+let listings=[],hasMore=false,listBusy=false,formBusy=false;
+function token(create=false){
+ let value=localStorage.getItem(keyName);
+ if(value&&!/^[a-f0-9]{64}$/.test(value))throw Error("Your editing key could not be read. Restore a saved editing key.");
+ if(!value&&create){
+  value=Array.from(crypto.getRandomValues(new Uint8Array(32)),n=>n.toString(16).padStart(2,"0")).join("");
+  localStorage.setItem(keyName,value);
+ }
+ return value;
+}
+async function request(method,path="",data=null,privateRequest=false){
+ const headers={"Content-Type":"application/json"};
+ if(privateRequest){
+  const value=token(method==="POST");if(!value)throw Error("Use the device where you posted, or restore your editing key.");
+  headers["x-edit-token"]=value;
+ }
+ const response=await fetch(endpoint+path,{method,headers,body:data?JSON.stringify(data):undefined,signal:AbortSignal.timeout(20000),cache:"no-store"});
+ let result;try{result=await response.json();}catch{throw Error("Partnership service unavailable. Try again online.");}
+ if(!response.ok)throw Error(result.error||"Unable to complete this request.");
+ return result;
+}
+function errorMessage(error){
+ return error.name==="TypeError"||error.name==="TimeoutError"?"Unable to connect. Check your internet connection and try again.":error.message;
+}
+function renderList(){
+ const area=el("partnerSearch").value.trim().toLowerCase(),shift=el("partnerFilter").value;
+ const shown=listings.filter(r=>(!area||r.area.toLowerCase().includes(area))&&(!shift||r.shift===shift));
+ el("partnerList").replaceChildren();
+ for(const r of shown){
+  const card=document.createElement("article");card.className="breakdown";card.style.margin="0";
+  const title=document.createElement("strong");title.textContent=r.driver_name;
+  const info=document.createElement("p");info.style.display="block";
+  info.textContent=r.area+" · "+(r.shift==="day"?"Day shift":"Night shift")+" · "+({arabia:"Arabia Taxi",dtc:"DTC",kabi:"KABI Taxi"}[r.company]||"Taxi");
+  const phone=document.createElement("p");phone.textContent=r.phone;
+  const actions=document.createElement("div");actions.className="row";
+  if(/^\+[0-9]{8,15}$/.test(r.phone)){
+   for(const [text,href] of [["Call","tel:"+r.phone],["WhatsApp","https://wa.me/"+r.phone.slice(1)]]){
+    const a=document.createElement("a");a.textContent=text;a.href=href;a.style.cssText="background:#e8f1ec;color:#193c32;padding:10px 14px;border-radius:9px;text-decoration:none";
+    if(text==="WhatsApp"){a.target="_blank";a.rel="noopener noreferrer";}
+    actions.append(a);
+   }
+  }
+  const date=document.createElement("small");date.textContent="Updated "+new Date(r.updated_at).toLocaleDateString("en-GB");
+  card.append(title,info,phone,actions,date);el("partnerList").append(card);
+ }
+ el("partnerListStatus").textContent=shown.length?shown.length+" available drivers shown"+(hasMore?" — load more to search further.":"."):listings.length?"No drivers match this area or shift." :"No available drivers posted yet. Be the first to add your availability.";
+ el("morePartners").hidden=!hasMore;
+}
+async function loadList(more=false){
+ if(listBusy)return;listBusy=true;el("refreshPartners").disabled=true;el("morePartners").disabled=true;
+ el("partnerListStatus").textContent="Loading drivers…";
+ try{
+  const result=await request("GET","?offset="+(more?listings.length:0));
+  listings=more?[...listings,...result.listings]:result.listings;hasMore=result.hasMore;renderList();
+ }catch(error){el("partnerListStatus").textContent=errorMessage(error);}
+ finally{listBusy=false;el("refreshPartners").disabled=false;el("morePartners").disabled=false;}
+}
+async function loadMine(){
+ try{
+  if(!token())return;
+  const {listing}=await request("GET","?mine=1",null,true);
+  el("removePartner").hidden=!listing;
+  if(listing){
+   for(const [id,name] of Object.entries({partnerName:"driver_name",partnerArea:"area",partnerShift:"shift",partnerCompany:"company",partnerPhone:"phone",partnerAvailability:"availability"}))el(id).value=listing[name];
+   el("partnerFormStatus").textContent=listing.availability==="matched"?"Your listing is hidden because you found a partner.":new Date(listing.expires_at)<new Date()?"Your listing expired. Update it to renew.":"Your listing is saved online. You can update or remove it here.";
+  }
+ }catch(error){el("partnerFormStatus").textContent=errorMessage(error);}
+}
+function busy(value){formBusy=value;el("postPartner").disabled=value;el("removePartner").disabled=value;}
+el("partnerCompany").value=document.getElementById("company").value;
+el("partnerForm").onsubmit=async event=>{
+ event.preventDefault();if(formBusy)return;if(!el("partnerForm").reportValidity())return;
+ busy(true);el("partnerFormStatus").textContent="Saving your listing…";
+ try{
+  const data={driver_name:el("partnerName").value.trim(),area:el("partnerArea").value.trim(),shift:el("partnerShift").value,company:el("partnerCompany").value,phone:el("partnerPhone").value.replace(/[\s()-]/g,""),availability:el("partnerAvailability").value,publish_consent:el("partnerConsent").checked};
+  await request("POST","",data,true);
+  el("removePartner").hidden=false;
+  el("partnerFormStatus").textContent=data.availability==="matched"?"Partner found — listing hidden.":"Posted online. Everyone can now see your availability. Save your editing key below.";
+  await loadList();
+ }catch(error){el("partnerFormStatus").textContent=errorMessage(error);}
+ finally{busy(false);}
+};
+el("removePartner").onclick=async()=>{
+ if(formBusy||!confirm("Remove your public partnership listing?"))return;
+ busy(true);
+ try{await request("DELETE","",null,true);el("removePartner").hidden=true;el("partnerFormStatus").textContent="Your listing was removed.";await loadList();}
+ catch(error){el("partnerFormStatus").textContent=errorMessage(error);}finally{busy(false);}
+};
+el("savePartnerKey").onclick=()=>{
+ try{
+  const value=token();if(!value)throw Error("Post a listing first to create your editing key.");
+  const blob=new Blob([JSON.stringify({type:"taxi-partnership-edit-key",version:1,key:value})],{type:"application/json"});
+  const url=URL.createObjectURL(blob),a=document.createElement("a");a.href=url;a.download="taxi-partnership-private-key.json";a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+ }catch(error){el("partnerFormStatus").textContent=errorMessage(error);}
+};
+el("restorePartnerKey").onclick=()=>el("partnerKeyFile").click();
+el("partnerKeyFile").onchange=async()=>{
+ const file=el("partnerKeyFile").files[0];el("partnerKeyFile").value="";if(!file)return;
+ try{
+  if(file.size>2048)throw Error("Select a partnership editing key file.");
+  const data=JSON.parse(await file.text());
+  if(data.type!=="taxi-partnership-edit-key"||data.version!==1||!/^[a-f0-9]{64}$/.test(data.key))throw Error("Invalid editing key file.");
+  if(token()&&token()!==data.key&&!confirm("Switch to this editing key? Download your current key first if you still need it."))return;
+  localStorage.setItem(keyName,data.key);await loadMine();
+ }catch(error){el("partnerFormStatus").textContent=errorMessage(error);}
+};
+el("refreshPartners").onclick=()=>loadList();
+el("morePartners").onclick=()=>loadList(true);
+el("partnerSearch").oninput=renderList;el("partnerFilter").onchange=renderList;
+loadList();loadMine();
+})();
+</script>
+
 </body>
 </html>
