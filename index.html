@@ -57,6 +57,14 @@ main{padding:14px}
 }
 [hidden]{display:none!important}select{display:block;width:100%;padding:12px;border:1px solid #b8cec1;border-radius:9px;margin-top:7px;font-size:16px;background:white;color:#193c32}.dailyCatchup{background:#fff8e8;border:1px solid #ecd7a7;border-radius:12px;padding:16px;margin:16px 0}.dailyCatchup p{display:flex;justify-content:space-between;gap:12px}.dailyCatchup strong{font-size:19px}
 .offday{background:#e0e5ec;color:#445066}
+
+#taxiTabs{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:8px;margin:18px 0}
+#taxiTabs button{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;min-height:82px;background:#fff;color:#193c32;border:1px solid #cbdcd1;border-radius:14px;padding:10px 4px;font-size:13px;font-weight:bold}
+#taxiTabs button span:first-child{font-size:23px}
+#taxiTabs button[aria-selected="true"]{background:#12644e;color:white;border-color:#12644e;box-shadow:0 4px 12px #12644e25}
+.taxiScreen{margin-top:16px}.taxiScreen>.panel{margin-top:0}
+@media(max-width:700px){#taxiTabs{grid-template-columns:repeat(4,minmax(0,1fr));gap:7px}#taxiTabs button{min-height:76px;font-size:12px}}
+@media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
 </style>
 <link rel="manifest" href="./manifest.webmanifest">
 <link rel="icon" type="image/png" href="./icons/taxi-192.png">
@@ -285,6 +293,71 @@ They do not sync between phones. Download backups regularly.
 </main>
 
 <script>
+function showTaxiScreen(name,focus=false){
+  const buttons=[...document.querySelectorAll("#taxiTabs [data-screen]")];
+  if(!buttons.some(b=>b.dataset.screen===name))name="targets";
+  document.querySelectorAll(".taxiScreen").forEach(panel=>panel.hidden=panel.id!=="screen-"+name);
+  buttons.forEach(button=>{
+    const active=button.dataset.screen===name;
+    button.setAttribute("aria-selected",String(active));button.tabIndex=active?0:-1;
+    if(active&&focus)button.focus();
+  });
+  document.getElementById("month").closest("label").hidden=["partnership","settings"].includes(name);
+  try{sessionStorage.setItem("taxi-active-screen",name);}catch(error){}
+  window.scrollTo({top:0,behavior:"smooth"});
+}
+(function(){
+  const main=document.querySelector("main");
+  const config=[
+    ["targets","🎯","Targets"],
+    ["collection","🚕","Daily Collection"],
+    ["calendar","📅","Calendar"],
+    ["salary","💰","Salary"],
+    ["partnership","🤝","Partnership"],
+    ["history","📋","Collections"],
+    ["settings","⚙️","Settings"]
+  ];
+  const nav=document.createElement("nav");nav.id="taxiTabs";nav.setAttribute("role","tablist");nav.setAttribute("aria-label","Taxi app sections");
+  const screens={};
+  config.forEach(([name,icon,label])=>{
+    const button=document.createElement("button");button.type="button";button.dataset.screen=name;button.id="tab-"+name;
+    button.setAttribute("role","tab");button.setAttribute("aria-controls","screen-"+name);
+    const symbol=document.createElement("span");symbol.textContent=icon;symbol.setAttribute("aria-hidden","true");
+    const title=document.createElement("span");title.textContent=label;button.append(symbol,title);
+    button.onclick=()=>showTaxiScreen(name);
+    button.onkeydown=event=>{
+      const keys=["ArrowRight","ArrowLeft","Home","End"];if(!keys.includes(event.key))return;event.preventDefault();
+      const index=config.findIndex(c=>c[0]===name);
+      const next=event.key==="Home"?0:event.key==="End"?config.length-1:(index+(event.key==="ArrowRight"?1:-1)+config.length)%config.length;
+      showTaxiScreen(config[next][0],true);
+    };
+    nav.append(button);
+    const panel=document.createElement("div");panel.id="screen-"+name;panel.className="taxiScreen";panel.hidden=true;
+    panel.setAttribute("role","tabpanel");panel.setAttribute("aria-labelledby",button.id);screens[name]=panel;
+  });
+  const layout=main.querySelector(".layout"),daily=document.getElementById("form").closest("section.panel");
+  const calendar=document.getElementById("calendar").closest("section.panel");
+  screens.targets.append(main.querySelector(".hero"),main.querySelector(".cards"));
+  screens.collection.append(daily);
+  screens.calendar.append(calendar);
+  screens.salary.append(document.getElementById("arabiaSalary"));
+  const salaryNote=document.createElement("p");salaryNote.className="panel";salaryNote.id="salaryUnavailable";
+  salaryNote.textContent="Month-end salary tiers are available for Arabia Taxi. Choose Arabia Taxi in Settings to view them.";
+  screens.salary.append(salaryNote);
+  screens.partnership.append(document.getElementById("partnershipSection"));
+  screens.history.append(document.getElementById("history").closest("section.panel"));
+  screens.settings.append(document.getElementById("company").closest("label"),document.getElementById("kabiOptions"),document.getElementById("installPanel"),document.getElementById("storageNotice").closest("section.panel"),main.querySelector("footer"));
+  layout.remove();
+  main.querySelector("h1").textContent="🚕 My Taxi";
+  const subtitle=main.querySelector("p.muted");subtitle.textContent="Choose a section below";
+  subtitle.after(nav);
+  config.forEach(([name])=>main.append(screens[name]));
+  let selected="targets";try{selected=sessionStorage.getItem("taxi-active-screen")||selected;}catch(error){}
+  showTaxiScreen(selected);
+})();
+</script>
+
+<script>
 "use strict";
 
 const COMPANIES = {
@@ -457,7 +530,7 @@ $("recoverLocal").onclick=()=>{
     if(!confirm("Recover "+missing.length+" missing days for this profile? Previously deleted days may be included. Existing days will stay unchanged."))return;
     if(persist(combined)){
       const last=Object.keys(combined).sort().at(-1);
-      $("month").value=last.slice(0,7);loadDay(last);
+      $("month").value=last.slice(0,7);showTaxiScreen("collection");loadDay(last);
       $("storageNotice").textContent="Recovered "+missing.length+" missing days. Download backup now.";
     }
   }catch(error){$("storageNotice").textContent="Unable to read recovery copies.";}
@@ -601,6 +674,7 @@ function arabiaCommission(total, calendarDays) {
 }
 function renderArabiaSalary(summary) {
   $("arabiaSalary").hidden = companyId !== "arabia";
+  $("salaryUnavailable").hidden=companyId==="arabia";
   if (companyId !== "arabia") return;
   const lastDate = summary.month + "-" + String(summary.count).padStart(2, "0");
   const available = today() >= lastDate;
@@ -706,6 +780,7 @@ function render() {
     button.append(amount);
 
     button.onclick = () => {
+      showTaxiScreen("collection");
       loadDay(date);
       $("message").textContent = record
         ? "Saved entry loaded. Saving will update this date."
