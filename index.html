@@ -65,6 +65,7 @@ main{padding:14px}
 .taxiScreen{margin-top:16px}.taxiScreen>.panel{margin-top:0}
 @media(max-width:700px){#taxiTabs{grid-template-columns:repeat(4,minmax(0,1fr));gap:7px}#taxiTabs button{min-height:76px;font-size:12px}}
 @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
+.collectionDashboard{background:#fff;border:1px solid #eeeef4;border-radius:24px;padding:22px;margin-bottom:26px;box-shadow:0 12px 28px #18233b08}.collectionDashboard h2{font-size:16px;color:#797986;font-weight:normal}.chartTotal{display:block;font-size:36px;color:#121323;margin:14px 0 20px}.chartScroll{overflow-x:auto;-webkit-overflow-scrolling:touch}.chartStats{display:flex;gap:22px;flex-wrap:wrap;margin:24px 0}.chartStats strong{display:block;font-size:24px;margin-top:8px;color:#141525}.chartAverage{border-left:5px solid #cf2168;padding-left:14px}.chartThreshold{color:#3354bd;font-weight:bold;font-size:14px}.collectionDashboard .muted{font-size:13px;line-height:1.6}@media(max-width:700px){.collectionDashboard{padding:16px}.chartTotal{font-size:30px}}
 </style>
 <link rel="manifest" href="./manifest.webmanifest">
 <link rel="icon" type="image/png" href="./icons/taxi-192.png">
@@ -109,6 +110,16 @@ main{padding:14px}
 
 <div class="layout">
 <section class="panel">
+<section class="collectionDashboard" aria-label="My daily collections">
+<p class="muted" id="chartCompany"></p>
+<h2 id="chartRange">My Collections</h2>
+<strong class="chartTotal" id="chartTotal"></strong>
+<div class="chartScroll" id="dailyCollectionChart"></div>
+<p id="chartPicked" class="muted" role="status" aria-live="polite"></p>
+<div class="chartStats"><div class="chartAverage"><small>Daily Average</small><strong id="chartAverage"></strong></div><div><small>Monthly POS tips · separate</small><strong id="chartTips"></strong></div></div>
+<p id="chartTargetLegend" class="chartThreshold"></p>
+<p class="muted" id="chartAverageNote"></p>
+</section>
 <h2>Daily collection</h2>
 <div class="breakdown">
 <strong>Add from shift summary</strong>
@@ -691,11 +702,69 @@ function renderArabiaSalary(summary) {
   $("salaryNote").textContent = "Calculated across " + summary.countedDays + " counted days; " + summary.excludedDays + " accident/breakdown days excluded. Missing entries count as zero. Commission uses the unrounded average.";
 }
 
+
+function collectionChartData(summary){
+ const now=today();
+ const elapsed=summary.month<now.slice(0,7)?summary.count:summary.month===now.slice(0,7)?Number(now.slice(8))-(records[now]?0:1):0;
+ const days=[];
+ for(let day=1;day<=elapsed;day++){
+  const date=summary.month+"-"+String(day).padStart(2,"0"),record=records[date];
+  if(isOff(record))continue;
+  days.push({date,value:record?calculate(record).net:0,saved:Boolean(record)});
+ }
+ const total=round(days.reduce((sum,d)=>sum+d.value,0));
+ return {days,total,average:days.length?total/days.length:0};
+}
+function renderCollectionChart(summary){
+ const data=collectionChartData(summary);
+ $("chartCompany").textContent=company.name;
+ $("chartTotal").textContent=money(data.total);
+ $("chartAverage").textContent=money(data.average);
+ $("chartTips").textContent=money(summary.posTips);
+ $("chartRange").textContent="My Collections · "+summary.month;
+ $("chartAverageNote").textContent="Average across "+data.days.length+" counted days so far. Missing days count as zero; accident/breakdown days are excluded. Collections exclude POS tips and normal deductions.";
+ const thresholdLabel=companyId==="arabia"?"35% commission threshold":"Daily target";
+ $("chartTargetLegend").textContent=thresholdLabel+" · "+money(DAILY_TARGET);
+ const host=$("dailyCollectionChart");host.replaceChildren();
+ $("chartPicked").textContent=data.days.length?"Tap a bar to see its clean collection.":"Save your first collection to see daily bars.";
+ if(!data.days.length)return;
+ const width=Math.max(340,data.days.length*42+80),height=330,left=18,right=78,top=40,bottom=45;
+ const plotW=width-left-right,plotH=height-top-bottom;
+ const low=Math.min(0,...data.days.map(d=>d.value),data.average);
+ const high=Math.max(DAILY_TARGET,data.average,...data.days.map(d=>d.value),1);
+ const min=low<0?Math.floor(low/100)*100:0,max=Math.ceil(high*1.18/100)*100;
+ const y=n=>top+(max-n)/(max-min)*plotH,step=plotW/data.days.length;
+ const ns="http://www.w3.org/2000/svg";
+ const svg=document.createElementNS(ns,"svg");svg.setAttribute("viewBox","0 0 "+width+" "+height);svg.style.cssText="display:block;width:100%;min-width:"+(data.days.length>7?width:0)+"px";
+ svg.setAttribute("role","group");svg.setAttribute("aria-label","Daily clean collections with average and "+thresholdLabel);
+ function node(tag,attrs,text){const n=document.createElementNS(ns,tag);for(const[k,v]of Object.entries(attrs))n.setAttribute(k,String(v));if(text!==undefined)n.textContent=text;svg.append(n);return n;}
+ for(let i=0;i<=3;i++){
+  const val=min+(max-min)*i/3;
+  node("line",{x1:left,y1:y(val),x2:width-right,y2:y(val),stroke:"#dcdde4","stroke-dasharray":"5 7"});
+  node("text",{x:width-right+10,y:y(val)+4,fill:"#787887","font-size":12},Math.round(val));
+ }
+ node("line",{x1:left,y1:y(0),x2:width-right,y2:y(0),stroke:"#292938"});
+ data.days.forEach((d,i)=>{
+  const x=left+i*step+step*.16,barW=step*.68;
+  const bar=node("rect",{x,y:Math.min(y(d.value),y(0)),width:barW,height:Math.max(3,Math.abs(y(d.value)-y(0))),rx:7,fill:d.saved?"#cdd2fa":"#e6e7ec",tabindex:0,role:"button","aria-label":d.date+": "+money(d.value)+(d.saved?"":", no entry"),style:"cursor:pointer"});
+  const title=document.createElementNS(ns,"title");title.textContent=d.date+" · "+money(d.value);bar.append(title);
+  const select=()=>{$("chartPicked").textContent=d.date+" · "+money(d.value)+(d.saved?" clean collection":" · not entered");};
+  bar.onclick=select;bar.onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();select();}};
+  node("text",{x:x+barW/2,y:height-18,fill:"#727281","font-size":12,"text-anchor":"middle"},d.date.slice(8)+"/"+d.date.slice(5,7));
+ });
+ node("line",{x1:left,y1:y(DAILY_TARGET),x2:width-right,y2:y(DAILY_TARGET),stroke:"#3354bd","stroke-width":2,"stroke-dasharray":"7 5"});
+ node("text",{x:left,y:y(DAILY_TARGET)-8,fill:"#3354bd","font-size":13,"font-weight":"bold"},companyId==="arabia"?"35% · AED "+DAILY_TARGET:"Target · AED "+DAILY_TARGET);
+ node("line",{x1:left,y1:y(data.average),x2:width-right,y2:y(data.average),stroke:"#cf2168","stroke-width":2.5});
+ node("text",{x:width-right+8,y:y(data.average)+4,fill:"#cf2168","font-size":12,"font-weight":"bold"},data.average.toFixed(2));
+ host.append(svg);
+}
+
 function render() {
   if (!/^\d{4}-\d{2}$/.test($("month").value)) return;
 
   const summary = monthSummary();
   renderArabiaSalary(summary);
+  renderCollectionChart(summary);
 
   $("target").textContent = money(summary.target);
   $("collected").textContent = money(summary.total);
