@@ -66,6 +66,7 @@ main{padding:14px}
 @media(max-width:700px){#taxiTabs{grid-template-columns:repeat(4,minmax(0,1fr));gap:7px}#taxiTabs button{min-height:76px;font-size:12px}}
 @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
 .collectionDashboard{background:#fff;border:1px solid #eeeef4;border-radius:24px;padding:22px;margin-bottom:26px;box-shadow:0 12px 28px #18233b08}.collectionDashboard h2{font-size:16px;color:#797986;font-weight:normal}.chartTotal{display:block;font-size:36px;color:#121323;margin:14px 0 20px}.chartScroll{overflow-x:auto;-webkit-overflow-scrolling:touch}.chartStats{display:flex;gap:22px;flex-wrap:wrap;margin:24px 0}.chartStats strong{display:block;font-size:24px;margin-top:8px;color:#141525}.chartAverage{border-left:5px solid #cf2168;padding-left:14px}.chartThreshold{color:#3354bd;font-weight:bold;font-size:14px}.collectionDashboard .muted{font-size:13px;line-height:1.6}@media(max-width:700px){.collectionDashboard{padding:16px}.chartTotal{font-size:30px}}
+.chartScroll rect[role="button"]:focus{outline:none}.chartScroll rect[role="button"]:focus-visible{stroke-width:3}
 </style>
 <link rel="manifest" href="./manifest.webmanifest">
 <link rel="icon" type="image/png" href="./icons/taxi-192.png">
@@ -715,6 +716,7 @@ function collectionChartData(summary){
  const total=round(days.reduce((sum,d)=>sum+d.value,0));
  return {days,total,average:days.length?total/days.length:0};
 }
+let selectedCollectionDate=null;
 function renderCollectionChart(summary){
  const data=collectionChartData(summary);
  $("chartCompany").textContent=company.name;
@@ -726,7 +728,7 @@ function renderCollectionChart(summary){
  const thresholdLabel=companyId==="arabia"?"35% commission threshold":"Daily target";
  $("chartTargetLegend").textContent=thresholdLabel+" · "+money(DAILY_TARGET);
  const host=$("dailyCollectionChart");host.replaceChildren();
- $("chartPicked").textContent=data.days.length?"Tap a bar to see its clean collection.":"Save your first collection to see daily bars.";
+ $("chartPicked").textContent=data.days.length?"Tap a day: blue = target achieved, yellow = below target. Grey = not entered.":"Save your first collection to see daily bars.";
  if(!data.days.length)return;
  const width=Math.max(340,data.days.length*42+80),height=330,left=18,right=78,top=40,bottom=45;
  const plotW=width-left-right,plotH=height-top-bottom;
@@ -744,11 +746,28 @@ function renderCollectionChart(summary){
   node("text",{x:width-right+10,y:y(val)+4,fill:"#787887","font-size":12},Math.round(val));
  }
  node("line",{x1:left,y1:y(0),x2:width-right,y2:y(0),stroke:"#292938"});
+ let selectSavedDay=null;
  data.days.forEach((d,i)=>{
   const x=left+i*step+step*.16,barW=step*.68;
-  const bar=node("rect",{x,y:Math.min(y(d.value),y(0)),width:barW,height:Math.max(3,Math.abs(y(d.value)-y(0))),rx:7,fill:d.saved?"#cdd2fa":"#e6e7ec",tabindex:0,role:"button","aria-label":d.date+": "+money(d.value)+(d.saved?"":", no entry"),style:"cursor:pointer"});
+  const bar=node("rect",{x,y:Math.min(y(d.value),y(0)),width:barW,height:Math.max(3,Math.abs(y(d.value)-y(0))),rx:7,fill:d.saved?(d.value>=DAILY_TARGET?"#a9c5ff":"#ffe393"):"#e6e7ec",tabindex:0,role:"button","aria-label":d.date+": "+money(d.value)+(d.saved?"":", no entry"),style:"cursor:pointer"});
   const title=document.createElementNS(ns,"title");title.textContent=d.date+" · "+money(d.value);bar.append(title);
-  const select=()=>{$("chartPicked").textContent=d.date+" · "+money(d.value)+(d.saved?" clean collection":" · not entered");};
+  const select=()=>{
+   selectedCollectionDate=d.date;
+   svg.querySelectorAll(".selectedAmount").forEach(n=>n.remove());
+   svg.querySelectorAll('rect[role="button"]').forEach(n=>{n.removeAttribute("stroke");n.removeAttribute("stroke-width");n.setAttribute("aria-pressed","false");});
+   const achieved=d.saved&&d.value>=DAILY_TARGET,color=d.saved?(achieved?"#2563eb":"#e1a700"):"#737b86";
+   bar.setAttribute("stroke",color);bar.setAttribute("stroke-width","2");bar.setAttribute("aria-pressed","true");
+   const label=money(d.value),labelW=Math.max(112,label.length*7.4+18);
+   const center=Math.max(labelW/2+3,Math.min(width-labelW/2-3,x+barW/2));
+   const labelY=Math.max(3,Math.min(y(d.value),y(0))-40);
+   const group=document.createElementNS(ns,"g");group.setAttribute("class","selectedAmount");group.style.pointerEvents="none";
+   const box=document.createElementNS(ns,"rect");for(const[k,v]of Object.entries({x:center-labelW/2,y:labelY,width:labelW,height:29,rx:6,fill:achieved?"#eff6ff":d.saved?"#fff7cc":"#f1f3f5",stroke:color,"stroke-width":1.8}))box.setAttribute(k,String(v));
+   const text=document.createElementNS(ns,"text");for(const[k,v]of Object.entries({x:center,y:labelY+19,fill:achieved?"#1d4ed8":d.saved?"#805900":"#4b5563","font-size":13,"font-weight":"bold","text-anchor":"middle"}))text.setAttribute(k,String(v));text.textContent=label;
+   group.append(box,text);svg.append(group);
+   $("chartPicked").textContent=d.date+" · "+label+(d.saved?(achieved?" · Target achieved":" · Below target"):" · not entered");
+  };
+  bar.onfocus=select;
+  if(d.date===selectedCollectionDate)selectSavedDay=select;
   bar.onclick=select;bar.onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();select();}};
   node("text",{x:x+barW/2,y:height-18,fill:"#727281","font-size":12,"text-anchor":"middle"},d.date.slice(8)+"/"+d.date.slice(5,7));
  });
@@ -757,6 +776,7 @@ function renderCollectionChart(summary){
  node("line",{x1:left,y1:y(data.average),x2:width-right,y2:y(data.average),stroke:"#cf2168","stroke-width":2.5});
  node("text",{x:width-right+8,y:y(data.average)+4,fill:"#cf2168","font-size":12,"font-weight":"bold"},data.average.toFixed(2));
  host.append(svg);
+ if(selectSavedDay)selectSavedDay();
 }
 
 function render() {
