@@ -67,6 +67,10 @@ main{padding:14px}
 @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
 .collectionDashboard{background:#fff;border:1px solid #eeeef4;border-radius:24px;padding:22px;margin-bottom:26px;box-shadow:0 12px 28px #18233b08}.collectionDashboard h2{font-size:16px;color:#797986;font-weight:normal}.chartTotal{display:block;font-size:36px;color:#121323;margin:14px 0 20px}.chartScroll{overflow-x:auto;-webkit-overflow-scrolling:touch}.chartStats{display:flex;gap:22px;flex-wrap:wrap;margin:24px 0}.chartStats strong{display:block;font-size:24px;margin-top:8px;color:#141525}.chartAverage{border-left:5px solid #cf2168;padding-left:14px}.chartThreshold{color:#3354bd;font-weight:bold;font-size:14px}.collectionDashboard .muted{font-size:13px;line-height:1.6}@media(max-width:700px){.collectionDashboard{padding:16px}.chartTotal{font-size:30px}}
 .chartScroll rect[role="button"]:focus{outline:none}.chartScroll rect[role="button"]:focus-visible{stroke-width:3}
+
+/* Smart Collection Entry */
+.smartEntry{margin:0 0 18px;padding:16px;border:1px solid #b7d9cc;border-radius:14px;background:linear-gradient(135deg,#effaf5,#f7fbff)}
+.smartEntry h2{margin:0 0 7px;font-size:19px}.smartEntry textarea{display:block;width:100%;min-height:92px;padding:12px;border:1px solid #9fc4b4;border-radius:10px;margin-top:8px;font:inherit;resize:vertical}.smartEntry .row{margin-top:12px}.smartEntryResult{min-height:22px;margin:10px 0 0;color:#174f40;font-weight:bold;line-height:1.45}.smartEntry small{line-height:1.5;display:block}
 </style>
 <link rel="manifest" href="./manifest.webmanifest">
 <link rel="icon" type="image/png" href="./icons/taxi-192.png">
@@ -147,6 +151,13 @@ main{padding:14px}
 </section>
 </div>
 <form id="form">
+<section class="smartEntry" aria-labelledby="smartEntryTitle">
+<h2 id="smartEntryTitle">✨ Smart collection entry</h2>
+<small>Write or speak normally and the app will directly save the collection for the selected date. Example: <em>620 AED total, Salik 10, booking 13, total trips 15, kilometres 170</em>.</small>
+<textarea id="smartEntryText" placeholder="Type your collection here…"></textarea>
+<div class="row"><button type="button" id="smartEntrySave">Add collection</button><button type="button" class="secondary" id="smartEntryMic">🎙️ Speak</button></div>
+<p class="smartEntryResult" id="smartEntryResult" role="status" aria-live="polite"></p>
+</section>
 <label>Date<input type="date" id="date" required></label>
 <label>Day status<select id="dayStatus"><option value="working">Working day</option><option value="breakdown">Not working — taxi breakdown</option><option value="accident">Not working — taxi accident</option></select></label>
 <small>Save the non-working day to remove its daily target. Missing entries still count toward the target.</small>
@@ -915,6 +926,43 @@ function render() {
     history.append(row);
   }
 }
+
+
+/* Smart collection entry: works on every driver's device without sending collection details outside the app. */
+function smartNumber(value){
+  const normalized=String(value||"").replace(/[٬,]/g,"").replace(/[٠-٩]/g,char=>String("٠١٢٣٤٥٦٧٨٩".indexOf(char)));
+  const found=normalized.match(/[0-9]+(?:[.][0-9]+)?/); return found?Number(found[0]):null;
+}
+function smartValue(text,names){
+  const group=names.join("|");
+  const forward=new RegExp("(?:("+group+"))\\s*(?:is|=|:|aed|dh|dirham|درہم)?\\s*(\\d+(?:\\.\\d+)?)","i");
+  const reverse=new RegExp("(\\d+(?:\\.\\d+)?)\\s*(?:aed|dh|dirham|درہم)?\\s*(?:"+group+")","i");
+  const match=text.match(forward)||text.match(reverse); return match?smartNumber(match[2]||match[1]):null;
+}
+function parseSmartCollection(raw){
+  const text=String(raw||"").toLowerCase().replace(/[،]/g," ");
+  return {meter:smartValue(text,["total money","total collection","total amount","collection","total","meter"]),tolls:smartValue(text,["salik","tollgate","toll","tolls"]),bookings:smartValue(text,["booking customers","bookings","booking"]),customers:smartValue(text,["total customers","total trips","shift trips","customers","trips","trip"]),km:smartValue(text,["hired kilometres","hired kilometers","kilometres","kilometers","km"])};
+}
+function smartEntrySummary(data){return "Total "+money(data.meter)+" · Salik "+money(data.tolls)+" · Bookings "+data.bookings+" · Trips "+data.customers+" · "+data.km+" km";}
+function addSmartCollection(){
+  const result=$("smartEntryResult"),data=parseSmartCollection($("smartEntryText").value),missing=[];
+  if(data.meter===null)missing.push("total AED"); if(data.bookings===null)missing.push("bookings"); if(data.customers===null)missing.push("total trips"); if(data.km===null)missing.push("kilometres");
+  if(missing.length){result.textContent="I need: "+missing.join(", ")+". Salik is optional and becomes AED 0 if not said.";return;}
+  data.tolls=data.tolls===null?0:data.tolls;
+  if(data.bookings>data.customers){result.textContent="Bookings cannot be more than total trips. Please correct the entry.";return;}
+  $("dayStatus").value="working"; $("meter").value=data.meter; $("tolls").value=data.tolls; $("bookings").value=Math.round(data.bookings); $("customers").value=Math.round(data.customers); $("km").value=data.km; $("posTips").value=0;
+  preview(); result.textContent="Added: "+smartEntrySummary(data)+". Saving now…";
+  if(typeof $("form").requestSubmit==="function")$("form").requestSubmit();else $("form").dispatchEvent(new Event("submit",{cancelable:true}));
+}
+$("smartEntrySave").addEventListener("click",addSmartCollection);
+$("smartEntryText").addEventListener("keydown",event=>{if((event.ctrlKey||event.metaKey)&&event.key==="Enter"){event.preventDefault();addSmartCollection();}});
+(function setupSmartMic(){
+  const Recognition=window.SpeechRecognition||window.webkitSpeechRecognition,button=$("smartEntryMic"); if(!Recognition){button.hidden=true;return;}
+  const recognition=new Recognition(); recognition.lang="en-AE"; recognition.interimResults=false; recognition.maxAlternatives=1;
+  recognition.onstart=()=>{button.disabled=true;$("smartEntryResult").textContent="Listening… say total, Salik, bookings, trips and kilometres.";};
+  recognition.onerror=()=>{$("smartEntryResult").textContent="Voice entry could not start. Please type the collection instead.";}; recognition.onend=()=>{button.disabled=false;};
+  recognition.onresult=event=>{$("smartEntryText").value=event.results[0][0].transcript;$("smartEntryResult").textContent="Heard: "+event.results[0][0].transcript;}; button.addEventListener("click",()=>recognition.start());
+})();
 
 $("form").addEventListener("input", preview);
 
