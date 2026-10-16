@@ -58,12 +58,12 @@ main{padding:14px}
 [hidden]{display:none!important}select{display:block;width:100%;padding:12px;border:1px solid #b8cec1;border-radius:9px;margin-top:7px;font-size:16px;background:white;color:#193c32}.dailyCatchup{background:#fff8e8;border:1px solid #ecd7a7;border-radius:12px;padding:16px;margin:16px 0}.dailyCatchup p{display:flex;justify-content:space-between;gap:12px}.dailyCatchup strong{font-size:19px}
 .offday{background:#e0e5ec;color:#445066}
 
-#taxiTabs{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:8px;margin:18px 0}
+#taxiTabs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:18px 0}
 #taxiTabs button{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;min-height:82px;background:#fff;color:#193c32;border:1px solid #cbdcd1;border-radius:14px;padding:10px 4px;font-size:13px;font-weight:bold}
 #taxiTabs button span:first-child{font-size:23px}
 #taxiTabs button[aria-selected="true"]{background:#12644e;color:white;border-color:#12644e;box-shadow:0 4px 12px #12644e25}
 .taxiScreen{margin-top:16px}.taxiScreen>.panel{margin-top:0}
-@media(max-width:700px){#taxiTabs{grid-template-columns:repeat(4,minmax(0,1fr));gap:7px}#taxiTabs button{min-height:76px;font-size:12px}}
+@media(max-width:700px){#taxiTabs{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}#taxiTabs button{min-height:76px;font-size:12px}}
 @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
 .collectionDashboard{background:#fff;border:1px solid #eeeef4;border-radius:24px;padding:22px;margin-bottom:26px;box-shadow:0 12px 28px #18233b08}.collectionDashboard h2{font-size:16px;color:#797986;font-weight:normal}.chartTotal{display:block;font-size:36px;color:#121323;margin:14px 0 20px}.chartScroll{overflow-x:auto;-webkit-overflow-scrolling:touch}.chartStats{display:flex;gap:22px;flex-wrap:wrap;margin:24px 0}.chartStats strong{display:block;font-size:24px;margin-top:8px;color:#141525}.chartAverage{border-left:5px solid #cf2168;padding-left:14px}.chartThreshold{color:#3354bd;font-weight:bold;font-size:14px}.collectionDashboard .muted{font-size:13px;line-height:1.6}@media(max-width:700px){.collectionDashboard{padding:16px}.chartTotal{font-size:30px}}
 .chartScroll rect[role="button"]:focus{outline:none}.chartScroll rect[role="button"]:focus-visible{stroke-width:3}
@@ -71,6 +71,7 @@ main{padding:14px}
 /* Smart Collection Entry */
 .smartEntry{margin:0 0 18px;padding:16px;border:1px solid #b7d9cc;border-radius:14px;background:linear-gradient(135deg,#effaf5,#f7fbff)}
 .smartEntry h2{margin:0 0 7px;font-size:19px}.smartEntry textarea{display:block;width:100%;min-height:92px;padding:12px;border:1px solid #9fc4b4;border-radius:10px;margin-top:8px;font:inherit;resize:vertical}.smartEntry .row{margin-top:12px}.smartEntryResult{min-height:22px;margin:10px 0 0;color:#174f40;font-weight:bold;line-height:1.45}.smartEntry small{line-height:1.5;display:block}
+.combinedOverview>.panel{margin-top:18px}.taxiScreen>details>summary{cursor:pointer;font-weight:bold;padding:3px}.taxiScreen>details[open]>summary{margin-bottom:16px}#screen-more>.panel{margin-bottom:18px}
 </style>
 <link rel="manifest" href="./manifest.webmanifest">
 <link rel="icon" type="image/png" href="./icons/taxi-192.png">
@@ -318,28 +319,20 @@ They do not sync between phones. Download backups regularly.
 <script>
 function showTaxiScreen(name,focus=false){
   const buttons=[...document.querySelectorAll("#taxiTabs [data-screen]")];
-  if(!buttons.some(b=>b.dataset.screen===name))name="targets";
+  name=["settings","partnership","more"].includes(name)?"more":"dashboard";
   document.querySelectorAll(".taxiScreen").forEach(panel=>panel.hidden=panel.id!=="screen-"+name);
   buttons.forEach(button=>{
     const active=button.dataset.screen===name;
     button.setAttribute("aria-selected",String(active));button.tabIndex=active?0:-1;
     if(active&&focus)button.focus();
   });
-  document.getElementById("month").closest("label").hidden=["partnership","settings"].includes(name);
+  document.getElementById("month").closest("label").hidden=false;
   try{sessionStorage.setItem("taxi-active-screen",name);}catch(error){}
   window.scrollTo({top:0,behavior:"smooth"});
 }
 (function(){
   const main=document.querySelector("main");
-  const config=[
-    ["targets","🎯","Targets"],
-    ["collection","🚕","Daily Collection"],
-    ["calendar","📅","Calendar"],
-    ["salary","💰","Salary"],
-    ["partnership","🤝","Partnership"],
-    ["history","📋","Collections"],
-    ["settings","⚙️","Settings"]
-  ];
+  const config=[["dashboard","🚕","Collections & Targets"],["more","⚙️","Settings & Partners"]];
   const nav=document.createElement("nav");nav.id="taxiTabs";nav.setAttribute("role","tablist");nav.setAttribute("aria-label","Taxi app sections");
   const screens={};
   config.forEach(([name,icon,label])=>{
@@ -360,22 +353,27 @@ function showTaxiScreen(name,focus=false){
   });
   const layout=main.querySelector(".layout"),daily=document.getElementById("form").closest("section.panel");
   const calendar=document.getElementById("calendar").closest("section.panel");
-  screens.targets.append(main.querySelector(".hero"),main.querySelector(".cards"));
-  screens.collection.append(daily);
-  screens.calendar.append(calendar);
-  screens.salary.append(document.getElementById("arabiaSalary"));
-  const salaryNote=document.createElement("p");salaryNote.className="panel";salaryNote.id="salaryUnavailable";
-  salaryNote.textContent="Month-end salary tiers are available for Arabia Taxi. Choose Arabia Taxi in Settings to view them.";
-  screens.salary.append(salaryNote);
-  screens.partnership.append(document.getElementById("partnershipSection"));
-  screens.history.append(document.getElementById("history").closest("section.panel"));
-  screens.settings.append(document.getElementById("company").closest("label"),document.getElementById("kabiOptions"),document.getElementById("installPanel"),document.getElementById("storageNotice").closest("section.panel"),main.querySelector("footer"));
+  const overview=document.createElement("section");overview.className="combinedOverview";overview.setAttribute("aria-label","Date, calendar and targets");
+  overview.append(document.getElementById("month").closest("label"),main.querySelector(".hero"),main.querySelector(".cards"),calendar);
+  screens.dashboard.append(overview,daily);
+  function fold(title,content){
+    const details=document.createElement("details");details.className="panel history";
+    const summary=document.createElement("summary");summary.textContent=title;details.append(summary,...content);
+    return details;
+  }
+  const salaryNote=document.createElement("p");salaryNote.className="muted";salaryNote.id="salaryUnavailable";
+  salaryNote.textContent="Month-end salary tiers are available for Arabia Taxi. Choose Arabia Taxi in Settings & Partners to view them.";
+  screens.dashboard.append(fold("Salary and commission",[document.getElementById("arabiaSalary"),salaryNote]),fold("Saved collections and backups",[document.getElementById("history").closest("section.panel")]));
+  const settings=document.createElement("section");settings.className="panel";
+  const heading=document.createElement("h2");heading.textContent="Settings";
+  settings.append(heading,document.getElementById("company").closest("label"),document.getElementById("kabiOptions"));
+  screens.more.append(settings,document.getElementById("partnershipSection"),document.getElementById("installPanel"),fold("Saved data and recovery",[document.getElementById("storageNotice").closest("section.panel")]),main.querySelector("footer"));
   layout.remove();
   main.querySelector("h1").textContent="🚕 My Taxi";
-  const subtitle=main.querySelector("p.muted");subtitle.textContent="Choose a section below";
+  const subtitle=main.querySelector("p.muted");subtitle.textContent="Your collections, calendar and targets in one place";
   subtitle.after(nav);
   config.forEach(([name])=>main.append(screens[name]));
-  let selected="targets";try{selected=sessionStorage.getItem("taxi-active-screen")||selected;}catch(error){}
+  let selected="dashboard";try{selected=sessionStorage.getItem("taxi-active-screen")||selected;}catch(error){}
   showTaxiScreen(selected);
 })();
 </script>
