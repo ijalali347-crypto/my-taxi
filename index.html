@@ -110,7 +110,7 @@ main{padding:14px}
 <section class="cards">
 <div class="card"><small>Monthly target</small><strong id="target"></strong></div>
 <div class="card"><small>Net collected</small><strong id="collected"></strong><p style="margin-bottom:0"><small>Monthly POS tips — separate</small><strong id="monthlyPosTips"></strong></p></div>
-<div class="card"><small>Still needed</small><strong id="remaining"></strong></div>
+<div class="card"><small>Monthly Halab Peak · separate</small><strong id="monthlyPeak"></strong><p>Driver 40%: <b id="monthlyPeakDriver"></b></p><p>Company 60%: <b id="monthlyPeakCompany"></b></p></div><div class="card"><small>Still needed</small><strong id="remaining"></strong></div>
 <div class="card"><small>Remaining days</small><strong id="days"></strong></div>
 </section>
 
@@ -164,7 +164,7 @@ main{padding:14px}
 <small>Save the non-working day to remove its daily target. Missing entries still count toward the target.</small>
 
 <div class="fields">
-<label>Total money (before discount, including Careem and POS tips) — AED
+<label>Total money (before discount, including Careem, POS tips and Halab Peak) — AED
 <input type="number" id="meter" min="0" step="0.01" required>
 </label>
 
@@ -185,11 +185,11 @@ main{padding:14px}
 </label>
 </div>
 
-<label>POS tips — AED<input type="number" id="posTips" min="0" max="1000000" step="0.01" value="0" required></label><small>POS tips are already included in Total money above. They are subtracted once to get your taxi collection and saved separately as monthly tips.</small><p><small>Booking customers must also be included in total customers.</small></p>
+<label>Halab Peak — AED<input type="number" id="halabPeak" min="0" max="1000000" step="0.01" value="0" required></label><small>Included in Total money. Removed from normal collection and split separately: 40% driver, 60% company.</small><label>POS tips — AED<input type="number" id="posTips" min="0" max="1000000" step="0.01" value="0" required></label><small>POS tips are already included in Total money above. They are subtracted once to get your taxi collection and saved separately as monthly tips.</small><p><small>Booking customers must also be included in total customers.</small></p>
 
 <div class="breakdown">
 <p><span>POS tips removed from total money</span><span id="removedPosTips"></span></p>
-<p><span>Collection excluding POS tips</span><span id="collectionWithoutTips"></span></p>
+<p><span>Halab Peak removed from total</span><span id="removedHalabPeak"></span></p><p><span>Halab Peak · driver 40%</span><span id="peakDriver"></span></p><p><span>Halab Peak · company 60%</span><span id="peakCompany"></span></p><p><span>Collection excluding tips and Halab Peak</span><span id="collectionWithoutTips"></span></p>
 <p><span><span id="fuelLabel">Fuel</span></span><span id="fuel"></span></p>
 <p><span><span id="bookingLabel">Bookings</span></span><span id="bookingFee"></span></p>
 <p><span>RTA: AED 2 per customer</span><span id="rta"></span></p>
@@ -300,7 +300,7 @@ Past days without entries count as elapsed days.
 <tr>
 <th>Date</th><th>Status</th><th>Total money incl. tips</th><th>Hired km</th>
 <th>Customers</th><th>Bookings</th><th>Tolls</th>
-<th>Deductions</th><th>Net AED</th><th>POS tips AED</th>
+<th>Deductions</th><th>Net AED</th><th>POS tips AED</th><th>Halab Peak AED</th><th>Peak driver 40%</th><th>Peak company 60%</th>
 </tr>
 </thead>
 <tbody id="history"></tbody>
@@ -442,6 +442,8 @@ function validRecord(record) {
       record[key] >= 0 &&
       record[key] <= 1000000
     ) &&
+    (record.halabPeak===undefined||(typeof record.halabPeak==="number"&&Number.isFinite(record.halabPeak)&&record.halabPeak>=0&&record.halabPeak<=1000000)) &&
+    (!isOff(record)||(record.halabPeak??0)===0) &&
     (record.posTips===undefined||(typeof record.posTips==="number"&&Number.isFinite(record.posTips)&&record.posTips>=0&&record.posTips<=1000000)) &&
     (!isOff(record)||(record.posTips??0)===0) &&
     Number.isInteger(record.customers) &&
@@ -464,8 +466,8 @@ function calculate(record) {
     booking,
     rta,
     deductions,
-    collection: round(record.meter-(record.posTips??0)),
-    net: round(record.meter-(record.posTips??0)-deductions)
+    collection: round(record.meter-(record.posTips??0)-(record.halabPeak??0)),
+    net: round(record.meter-(record.posTips??0)-(record.halabPeak??0)-deductions)
   };
 }
 
@@ -560,11 +562,12 @@ storageInventory();
 
 function readForm() {
   const status=$("dayStatus").value;
-  return {...Object.fromEntries(fields.map(key=>[key,status==="working"?(Number($(key).value)||0):0])),posTips:status==="working"?round(Number($("posTips").value)||0):0,status};
+  return {...Object.fromEntries(fields.map(key=>[key,status==="working"?(Number($(key).value)||0):0])),halabPeak:status==="working"?round(Number($("halabPeak").value)||0):0,posTips:status==="working"?round(Number($("posTips").value)||0):0,status};
 }
 function syncDayStatus(){
   const off=$("dayStatus").value!=="working";
   fields.forEach(key=>{$(key).disabled=off;$(key).required=!off;});
+  $("halabPeak").disabled=off;$("halabPeak").required=!off;
   $("posTips").disabled=off;$("posTips").required=!off;
 }
 
@@ -574,7 +577,7 @@ function dailyPlan(date, allRecords, configuration, enteredNet, status="working"
   const prefix=date.slice(0,7);
   const prior=round(Object.entries(allRecords)
     .filter(([d,r])=>d.startsWith(prefix)&&d<date&&!isOff(r))
-    .reduce((sum,[,r])=>sum+round(r.meter-(r.posTips??0)-round(round(r.km*configuration.fuel)+r.bookings*configuration.booking+r.customers*configuration.rta+r.tolls)),0));
+    .reduce((sum,[,r])=>sum+round(r.meter-(r.posTips??0)-(r.halabPeak??0)-round(round(r.km*configuration.fuel)+r.bookings*configuration.booking+r.customers*configuration.rta+r.tolls)),0));
   const total=round(prior+enteredNet);
   const excluded=Object.entries(allRecords).filter(([d,r])=>d.startsWith(prefix)&&d!==date&&isOff(r));
   const currentOff=status!=="working";
@@ -605,6 +608,9 @@ function preview() {
   const result = calculate(record);
   updateDailyPlan(result.net);
 
+  $("removedHalabPeak").textContent=money(record.halabPeak??0);
+  $("peakDriver").textContent=money(round((record.halabPeak??0)*0.4));
+  $("peakCompany").textContent=money(round((record.halabPeak??0)-round((record.halabPeak??0)*0.4)));
   $("removedPosTips").textContent=money(record.posTips??0);
   $("collectionWithoutTips").textContent=money(result.collection??0);
   $("fuel").textContent = money(result.fuel);
@@ -629,6 +635,7 @@ function loadDay(date) {
     $(key).value = record ? record[key] : key === "tolls" ? 0 : "";
   });
 
+  $("halabPeak").value=record?.halabPeak??0;
   $("posTips").value=record?.posTips??0;
   $("delete").disabled = !record;
   preview();
@@ -674,6 +681,8 @@ function monthSummary() {
     excludedDays:excluded.length,
     entries,
     total,
+    halabPeak:round(entries.reduce((sum,[,record])=>sum+(record.halabPeak??0),0)),
+    peakDriver:round(entries.reduce((sum,[,record])=>sum+round((record.halabPeak??0)*0.4),0)),
     posTips:round(entries.reduce((sum,[,record])=>sum+(record.posTips??0),0)),
     target,
     remaining,
@@ -733,7 +742,7 @@ function renderCollectionChart(summary){
  $("chartAverage").textContent=money(data.average);
  $("chartTips").textContent=money(summary.posTips);
  $("chartRange").textContent="My Collections · "+summary.month;
- $("chartAverageNote").textContent="Average across "+data.days.length+" counted days so far. Missing days count as zero; accident/breakdown days are excluded. Collections exclude POS tips and normal deductions.";
+ $("chartAverageNote").textContent="Average across "+data.days.length+" counted days so far. Missing days count as zero; accident/breakdown days are excluded. Collections exclude POS tips, Halab Peak and normal deductions.";
  const thresholdLabel=companyId==="arabia"?"35% commission threshold":"Daily target";
  $("chartTargetLegend").textContent=thresholdLabel+" · "+money(DAILY_TARGET);
  const host=$("dailyCollectionChart");host.replaceChildren();
@@ -797,6 +806,9 @@ function render() {
 
   $("target").textContent = money(summary.target);
   $("collected").textContent = money(summary.total);
+  $("monthlyPeak").textContent=money(summary.halabPeak);
+  $("monthlyPeakDriver").textContent=money(summary.peakDriver);
+  $("monthlyPeakCompany").textContent=money(round(summary.halabPeak-summary.peakDriver));
   $("monthlyPosTips").textContent=money(summary.posTips);
   $("remaining").textContent = money(summary.remaining);
   $("days").textContent = summary.days;
@@ -821,7 +833,7 @@ function render() {
     percent.toFixed(1) + "% of monthly target collected";
 
   $("grossTotal").textContent = money(
-    summary.entries.reduce((sum, [, record]) => sum + record.meter-(record.posTips??0), 0)
+    summary.entries.reduce((sum, [, record]) => sum + record.meter-(record.posTips??0)-(record.halabPeak??0), 0)
   );
 
   $("deductionTotal").textContent = money(
@@ -905,7 +917,10 @@ function render() {
       record.tolls.toFixed(2),
       result.deductions.toFixed(2),
       result.net.toFixed(2),
-      (record.posTips??0).toFixed(2)
+      (record.posTips??0).toFixed(2),
+      (record.halabPeak??0).toFixed(2),
+      round((record.halabPeak??0)*0.4).toFixed(2),
+      round((record.halabPeak??0)-round((record.halabPeak??0)*0.4)).toFixed(2)
     ].forEach(value => {
       const cell = document.createElement("td");
       cell.textContent = value;
@@ -948,7 +963,7 @@ function addSmartCollection(){
   if(missing.length){result.textContent="I need: "+missing.join(", ")+". Salik is optional and becomes AED 0 if not said.";return;}
   data.tolls=data.tolls===null?0:data.tolls;
   if(data.bookings>data.customers){result.textContent="Bookings cannot be more than total trips. Please correct the entry.";return;}
-  $("dayStatus").value="working"; $("meter").value=data.meter; $("tolls").value=data.tolls; $("bookings").value=Math.round(data.bookings); $("customers").value=Math.round(data.customers); $("km").value=data.km; $("posTips").value=0;
+  $("dayStatus").value="working"; $("meter").value=data.meter; $("tolls").value=data.tolls; $("bookings").value=Math.round(data.bookings); $("customers").value=Math.round(data.customers); $("km").value=data.km; $("posTips").value=0; $("halabPeak").value=0;
   preview(); result.textContent="Added: "+smartEntrySummary(data)+". Saving now…";
   if(typeof $("form").requestSubmit==="function")$("form").requestSubmit();else $("form").dispatchEvent(new Event("submit",{cancelable:true}));
 }
@@ -991,7 +1006,7 @@ $("form").addEventListener("submit", event => {
     return;
   }
 
-  if((record.posTips??0)>record.meter){$("message").textContent="POS tips cannot exceed Total money. Enter the total including tips.";return;}
+  if((record.posTips??0)+(record.halabPeak??0)>record.meter){$("message").textContent="POS tips plus Halab Peak cannot exceed Total money. Enter the total including both.";return;}
 
   if (date > today()) {
     $("message").textContent =
@@ -999,7 +1014,7 @@ $("form").addEventListener("submit", event => {
     return;
   }
 
-  if(isOff(record)&&records[date]&&!isOff(records[date])&&(fields.some(key=>records[date][key]>0)||(records[date].posTips??0)>0)&&!confirm("Marking this as non-working replaces its saved collection with zero. Continue?"))return;
+  if(isOff(record)&&records[date]&&!isOff(records[date])&&(fields.some(key=>records[date][key]>0)||(records[date].posTips??0)>0||(records[date].halabPeak??0)>0)&&!confirm("Marking this as non-working replaces its saved collection with zero. Continue?"))return;
   if (persist({ ...records, [date]: record })) {
     $("month").value = date.slice(0, 7);
     loadDay(date);
@@ -1097,7 +1112,7 @@ $("csv").onclick = () => {
   const summary = monthSummary();
 
   const lines = [
-    "Date,Status,Meter AED,Hired km,Customers,Bookings,Tolls AED,Fuel AED,Booking fees AED,RTA AED,Deductions AED,Net AED,POS tips AED,Collection excluding POS tips AED"
+    "Date,Status,Meter AED,Hired km,Customers,Bookings,Tolls AED,Fuel AED,Booking fees AED,RTA AED,Deductions AED,Net AED,POS tips AED,Collection excluding POS tips and Halab Peak AED,Halab Peak AED,Halab Peak driver 40% AED,Halab Peak company 60% AED"
   ];
 
   summary.entries.forEach(([date, record]) => {
@@ -1116,7 +1131,10 @@ $("csv").onclick = () => {
       result.deductions,
       result.net,
       record.posTips??0,
-      result.collection??0
+      result.collection??0,
+      record.halabPeak??0,
+      round((record.halabPeak??0)*0.4),
+      round((record.halabPeak??0)-round((record.halabPeak??0)*0.4))
     ].join(","));
   });
 
@@ -1133,7 +1151,7 @@ $("kabiVehicle").value=kabiVehicle;
 $("kabiShift").value=kabiShift;
 function switchKabiProfile(){
   const current=records[$("date").value];
-  const dirty=Number($("posTips").value)!==(current?.posTips??0)||fields.some(key=>$(key).value!==""&&Number($(key).value)!==(current?current[key]:0));
+  const dirty=Number($("halabPeak").value)!==(current?.halabPeak??0)||Number($("posTips").value)!==(current?.posTips??0)||fields.some(key=>$(key).value!==""&&Number($(key).value)!==(current?current[key]:0));
   if((dirty||$("dayStatus").value!==(current?.status||"working"))&&!confirm("Change vehicle or shift? Unsaved form entries will be lost.")){
     $("kabiVehicle").value=kabiVehicle;$("kabiShift").value=kabiShift;return;
   }
@@ -1155,7 +1173,7 @@ $("company").addEventListener("change",()=>{
   const next=$("company").value;
   if(!COMPANIES[next])return;
   const current=records[$("date").value];
-  const dirty=Number($("posTips").value)!==(current?.posTips??0)||fields.some(key=>$(key).value!==""&&Number($(key).value)!==(current?current[key]:0));
+  const dirty=Number($("halabPeak").value)!==(current?.halabPeak??0)||Number($("posTips").value)!==(current?.posTips??0)||fields.some(key=>$(key).value!==""&&Number($(key).value)!==(current?current[key]:0));
   if(dirty&&!confirm("Switch company? Unsaved entries on this form will be lost.")){$("company").value=companyId;return;}
   try{localStorage.setItem("taxi-selected-company",next);window.location.reload();}
   catch(error){$("company").value=companyId;$("message").textContent="Unable to change company. Check browser storage settings.";}
