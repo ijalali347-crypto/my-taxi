@@ -99,6 +99,7 @@ main{padding:14px}
 <input type="month" id="month">
 </label>
 
+<p id="dtcPeriodNotice" class="muted" hidden></p>
 <section class="hero">
 <small>REQUIRED PER REMAINING DAY</small>
 <strong id="required">AED 0.00</strong>
@@ -354,7 +355,7 @@ function showTaxiScreen(name,focus=false){
   const layout=main.querySelector(".layout"),daily=document.getElementById("form").closest("section.panel");
   const calendar=document.getElementById("calendar").closest("section.panel");
   const overview=document.createElement("section");overview.className="combinedOverview";overview.setAttribute("aria-label","Date, calendar and targets");
-  overview.append(document.getElementById("month").closest("label"),main.querySelector(".hero"),main.querySelector(".cards"),calendar);
+  overview.append(document.getElementById("month").closest("label"),document.getElementById("dtcPeriodNotice"),main.querySelector(".hero"),main.querySelector(".cards"),calendar);
   screens.dashboard.append(overview,daily);
   function fold(title,content){
     const details=document.createElement("details");details.className="panel history";
@@ -553,7 +554,7 @@ $("recoverLocal").onclick=()=>{
     if(!confirm("Recover "+missing.length+" missing days for this profile? Previously deleted days may be included. Existing days will stay unchanged."))return;
     if(persist(combined)){
       const last=Object.keys(combined).sort().at(-1);
-      $("month").value=last.slice(0,7);showTaxiScreen("collection");loadDay(last);
+      $("month").value=monthForDate(last);showTaxiScreen("collection");loadDay(last);
       $("storageNotice").textContent="Recovered "+missing.length+" missing days. Download backup now.";
     }
   }catch(error){$("storageNotice").textContent="Unable to read recovery copies.";}
@@ -571,18 +572,32 @@ function syncDayStatus(){
   $("posTips").disabled=off;$("posTips").required=!off;
 }
 
+
+function shiftDate(date,days){
+ const d=new Date(date+"T12:00:00Z");d.setUTCDate(d.getUTCDate()+days);return d.toISOString().slice(0,10);
+}
+function monthForDate(date){
+ if(companyId!=="dtc"||Number(date.slice(8))<21)return date.slice(0,7);
+ return shiftDate(date.slice(0,7)+"-01",32).slice(0,7);
+}
+function targetPeriod(month){
+ const [year,number]=month.split("-").map(Number);
+ const end=companyId==="dtc"?month+"-20":new Date(Date.UTC(year,number,0,12)).toISOString().slice(0,10);
+ const start=companyId==="dtc"?shiftDate(month+"-01",-1).slice(0,7)+"-21":month+"-01";
+ const dates=[];for(let date=start;date<=end;date=shiftDate(date,1))dates.push(date);
+ return {start,end,dates};
+}
+
 function dailyPlan(date, allRecords, configuration, enteredNet, status="working") {
-  const [year,month,day]=date.split("-").map(Number);
-  const count=new Date(year,month,0).getDate();
-  const prefix=date.slice(0,7);
+  const period=targetPeriod(monthForDate(date)),inPeriod=d=>d>=period.start&&d<=period.end;
   const prior=round(Object.entries(allRecords)
-    .filter(([d,r])=>d.startsWith(prefix)&&d<date&&!isOff(r))
+    .filter(([d,r])=>inPeriod(d)&&d<date&&!isOff(r))
     .reduce((sum,[,r])=>sum+round(r.meter-(r.posTips??0)-(r.halabPeak??0)-round(round(r.km*configuration.fuel)+r.bookings*configuration.booking+r.customers*configuration.rta+r.tolls)),0));
   const total=round(prior+enteredNet);
-  const excluded=Object.entries(allRecords).filter(([d,r])=>d.startsWith(prefix)&&d!==date&&isOff(r));
+  const excluded=Object.entries(allRecords).filter(([d,r])=>inPeriod(d)&&d!==date&&isOff(r));
   const currentOff=status!=="working";
-  const counted=count-excluded.length-(currentOff?1:0);
-  const days=count-day-excluded.filter(([d])=>d>date).length;
+  const counted=period.dates.length-excluded.length-(currentOff?1:0);
+  const days=period.dates.filter(d=>d>date&&!isOff(allRecords[d])).length;
   const remaining=Math.max(0,round(counted*configuration.target-total));
   return {total,days,remaining,goal:days?remaining/days:0};
 }
@@ -643,37 +658,23 @@ function loadDay(date) {
 }
 
 function monthSummary() {
-  const month = $("month").value;
-  const [year, monthNumber] = month.split("-").map(Number);
-  const count = new Date(year, monthNumber, 0).getDate();
-  const now = today();
-
-  const entries = Object.entries(records)
-    .filter(([date]) => date.startsWith(month))
-    .sort(([a], [b]) => a.localeCompare(b));
-
-  const total = round(
-    entries.reduce((sum, [, record]) => sum + calculate(record).net, 0)
-  );
-
-  let elapsed = 0;
-
-  if (month < now.slice(0, 7)) {
-    elapsed = count;
-  } else if (month === now.slice(0, 7)) {
-    elapsed = Number(now.slice(8)) - 1;
-    if (records[now]) elapsed += 1;
-  }
-
+  const month=$("month").value;
+  const [year,monthNumber]=month.split("-").map(Number);
+  const period=targetPeriod(month),count=period.dates.length,now=today();
+  const entries=Object.entries(records).filter(([date])=>date>=period.start&&date<=period.end).sort(([a],[b])=>a.localeCompare(b));
+  const total=round(entries.reduce((sum,[,record])=>sum+calculate(record).net,0));
+  const elapsed=period.dates.filter(date=>date<now||(date===now&&records[now])).length;
   const excluded=entries.filter(([,record])=>isOff(record));
   const countedDays=count-excluded.length;
-  const remainingExcluded=excluded.filter(([date])=>Number(date.slice(8))>elapsed).length;
+  const remainingExcluded=excluded.filter(([date])=>period.dates.indexOf(date)>=elapsed).length;
   const days = count - elapsed - remainingExcluded;
   const target = countedDays * DAILY_TARGET;
   const remaining = Math.max(0, round(target - total));
 
   return {
     month,
+    ...period,
+    elapsed,
     year,
     monthNumber,
     count,
@@ -723,11 +724,9 @@ function renderArabiaSalary(summary) {
 
 
 function collectionChartData(summary){
- const now=today();
- const elapsed=summary.month<now.slice(0,7)?summary.count:summary.month===now.slice(0,7)?Number(now.slice(8))-(records[now]?0:1):0;
  const days=[];
- for(let day=1;day<=elapsed;day++){
-  const date=summary.month+"-"+String(day).padStart(2,"0"),record=records[date];
+ for(const date of summary.dates.slice(0,summary.elapsed)){
+  const record=records[date];
   if(isOff(record))continue;
   days.push({date,value:record?calculate(record).net:0,saved:Boolean(record)});
  }
@@ -741,7 +740,7 @@ function renderCollectionChart(summary){
  $("chartTotal").textContent=money(data.total);
  $("chartAverage").textContent=money(data.average);
  $("chartTips").textContent=money(summary.posTips);
- $("chartRange").textContent="My Collections · "+summary.month;
+ $("chartRange").textContent="My Collections · "+(companyId==="dtc"?summary.start+" to "+summary.end:summary.month);
  $("chartAverageNote").textContent="Average across "+data.days.length+" counted days so far. Missing days count as zero; accident/breakdown days are excluded. Collections exclude POS tips, Halab Peak and normal deductions.";
  const thresholdLabel=companyId==="arabia"?"35% commission threshold":"Daily target";
  $("chartTargetLegend").textContent=thresholdLabel+" · "+money(DAILY_TARGET);
@@ -801,6 +800,8 @@ function render() {
   if (!/^\d{4}-\d{2}$/.test($("month").value)) return;
 
   const summary = monthSummary();
+  $("dtcPeriodNotice").hidden=companyId!=="dtc";
+  $("dtcPeriodNotice").textContent="DTC target cycle: "+summary.start+" to "+summary.end+" · "+summary.count+" calendar days. Month picker selects the month in which the cycle ends.";
   renderArabiaSalary(summary);
   renderCollectionChart(summary);
 
@@ -858,14 +859,14 @@ function render() {
   });
 
   const firstWeekday =
-    new Date(summary.year, summary.monthNumber - 1, 1).getDay();
+    new Date(summary.start+"T12:00:00Z").getUTCDay();
 
   for (let i = 0; i < firstWeekday; i++) {
     calendar.append(document.createElement("div"));
   }
 
-  for (let day = 1; day <= summary.count; day++) {
-    const date = summary.month + "-" + String(day).padStart(2, "0");
+  for (const date of summary.dates) {
+    const day=Number(date.slice(8));
     const record = records[date];
     const result = record ? calculate(record) : null;
     const button = document.createElement("button");
@@ -879,7 +880,7 @@ function render() {
     if (date === $("date").value) button.classList.add("selected");
     if (date === today()) button.classList.add("today");
 
-    button.textContent = day;
+    button.textContent = companyId==="dtc"?day+"/"+Number(date.slice(5,7)):day;
     button.setAttribute(
       "aria-label",
       date + (isOff(record)?", not working: "+record.status:record ? ", net " + money(result.net) : ", no entry")
@@ -982,7 +983,7 @@ $("form").addEventListener("input", preview);
 $("date").addEventListener("change", () => {
   const date = $("date").value;
   if (!validDate(date)) return;
-  $("month").value = date.slice(0, 7);
+  $("month").value = monthForDate(date);
   loadDay(date);
   $("message").textContent = "";
 });
@@ -990,7 +991,7 @@ $("date").addEventListener("change", () => {
 $("month").addEventListener("change", () => {
   const month = $("month").value;
   if (!month) return;
-  loadDay(month === today().slice(0, 7) ? today() : month + "-01");
+  loadDay(month === monthForDate(today()) ? today() : targetPeriod(month).start);
   $("message").textContent = "";
 });
 
@@ -1016,7 +1017,7 @@ $("form").addEventListener("submit", event => {
 
   if(isOff(record)&&records[date]&&!isOff(records[date])&&(fields.some(key=>records[date][key]>0)||(records[date].posTips??0)>0||(records[date].halabPeak??0)>0)&&!confirm("Marking this as non-working replaces its saved collection with zero. Continue?"))return;
   if (persist({ ...records, [date]: record })) {
-    $("month").value = date.slice(0, 7);
+    $("month").value = monthForDate(date);
     loadDay(date);
     $("message").textContent = "Collection saved successfully!";
   }
@@ -1179,7 +1180,7 @@ $("company").addEventListener("change",()=>{
   catch(error){$("company").value=companyId;$("message").textContent="Unable to change company. Check browser storage settings.";}
 });
 $("date").max = today();
-$("month").value = today().slice(0, 7);
+$("month").value = monthForDate(today());
 loadDay(today());
 
 
