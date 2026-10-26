@@ -9,7 +9,7 @@
 *{box-sizing:border-box}
 body{margin:0;background:#f2f6f4;color:#193c32;font-family:Arial,sans-serif}
 main{max-width:1050px;margin:auto;padding:20px}
-h1{margin-bottom:6px}
+h1{margin-bottom:6px;display:flex;align-items:center;gap:10px}.appLogo{width:46px;height:46px;object-fit:contain}
 h2{font-size:20px}
 small,.muted{color:#60776e}
 .hero{background:#123c35;color:white;padding:25px;border-radius:20px;margin:20px 0}
@@ -74,15 +74,15 @@ main{padding:14px}
 .combinedOverview>.panel{margin-top:18px}.taxiScreen>details>summary{cursor:pointer;font-weight:bold;padding:3px}.taxiScreen>details[open]>summary{margin-bottom:16px}#screen-more>.panel{margin-bottom:18px}
 </style>
 <link rel="manifest" href="./manifest.webmanifest">
-<link rel="icon" type="image/png" href="./icons/taxi-192.png">
-<link rel="apple-touch-icon" href="./icons/taxi-180.png">
+<link rel="icon" type="image/svg+xml" href="./icons/taxi-logo.svg">
+<link rel="apple-touch-icon" href="./icons/taxi-logo.svg">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="My Taxi">
 </head>
 <body>
 <main>
-<h1>🚕 Taxi Collection Tracker</h1>
+<h1><img class="appLogo" src="./icons/taxi-logo.svg" alt="">Taxi Collection Tracker</h1>
 <p class="muted">Daily collections and monthly targets</p>
 <label>Taxi company<select id="company"><option value="arabia">ARABIA TAXI</option><option value="dtc">DTC DRIVER’S</option><option value="kabi">KABI TAXI</option></select></label>
 <div id="kabiOptions" class="fields" hidden>
@@ -92,7 +92,7 @@ main{padding:14px}
 </div><p class="muted" id="companyRates"></p>
 
 <section class="panel" id="installPanel" style="margin:18px 0">
-<div class="row"><img src="./icons/taxi-192.png" width="52" height="52" alt="" style="border-radius:12px"><div style="flex:1"><strong>Install My Taxi</strong><p id="installHelp" class="muted" style="margin:6px 0">Install on your phone to open in its own app window.</p></div><button type="button" id="installApp">Install app</button></div>
+<div class="row"><img src="./icons/taxi-logo.svg" width="52" height="52" alt="" style="object-fit:contain"><div style="flex:1"><strong>Install My Taxi</strong><p id="installHelp" class="muted" style="margin:6px 0">Install on your phone to open in its own app window.</p></div><button type="button" id="installApp">Install app</button></div>
 </section>
 <section class="panel" style="margin:18px 0"><h2>Saved data and recovery</h2><p id="storageNotice" role="status" aria-live="polite"></p><p class="muted">Check your company, vehicle, shift and View month. Records are separate for each profile. Open this app in the same browser where you saved them.</p><div id="storedProfiles"></div><div class="row"><button type="button" class="secondary" id="recoverLocal">Recover missing days</button><button type="button" class="secondary" id="exportRaw">Download device recovery data</button></div><p class="muted">Download backup regularly. Device recovery copies do not protect against clearing browser data or losing this phone.</p></section>
 <label>View month
