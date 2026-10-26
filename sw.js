@@ -1,6 +1,6 @@
 "use strict";
 const CACHE_NAME = "taxi-offline-" + new URL(self.registration.scope).pathname + "-v25";
-const ASSETS = ["index.html","manifest.webmanifest","icons/taxi-192.png","icons/taxi-512.png","icons/taxi-180.png","icons/taxi-logo.svg","icons/taxi-logo.svg"].map(path=>new URL(path,self.registration.scope).href);
+const ASSETS = ["index.html","manifest.webmanifest","icons/taxi-192.png","icons/taxi-512.png","icons/taxi-180.png","icons/taxi-logo.svg"].map(path=>new URL(path,self.registration.scope).href);
 const APP = new URL("index.html", self.registration.scope).href;
 self.addEventListener("install", event => {
   event.waitUntil((async () => {
