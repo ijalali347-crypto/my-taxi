@@ -383,9 +383,15 @@ function showTaxiScreen(name,focus=false){
 "use strict";
 
 const COMPANIES = {
-  arabia: {name: "ARABIA TAXI", target: 350, fuel: 0.85, booking: 6, rta: 2},
+  arabia: {name: "ARABIA TAXI", target: 350, fuel: 0.91, booking: 7, rta: 2},
   dtc: {name: "DTC DRIVER’S", target: 425, fuel: 0.66, booking: 7, rta: 2},
-  kabi: {name: "KABI TAXI", target: 360, fuel: 0.86, booking: 7, rta: 2}
+  kabi: {name: "KABI TAXI", target: 360, fuel: 0.92, booking: 7, rta: 2}
+};
+// Rates from before 5 November 2026 remain unchanged in saved history.
+const RATE_CHANGE_DATE = "2026-11-05";
+const PREVIOUS_RATES = {
+  arabia: {fuel: 0.85, booking: 6},
+  kabi: {fuel: 0.86, booking: 7}
 };
 let companyId = "arabia";
 try {const chosen=localStorage.getItem("taxi-selected-company");if(COMPANIES[chosen])companyId=chosen;}catch(error){}
@@ -455,11 +461,18 @@ function validRecord(record) {
 }
 
 function isOff(record){return record?.status==="breakdown"||record?.status==="accident";}
-function calculate(record) {
+function ratesForDate(date) {
+  if (date < RATE_CHANGE_DATE && PREVIOUS_RATES[companyId]) {
+    return {...company, ...PREVIOUS_RATES[companyId]};
+  }
+  return company;
+}
+function calculate(record, date=$("date")?.value||today()) {
   if(isOff(record))return {fuel:0,booking:0,rta:0,deductions:0,net:0};
-  const fuel = round(record.km * company.fuel);
-  const booking = record.bookings * company.booking;
-  const rta = record.customers * company.rta;
+  const rates = ratesForDate(date);
+  const fuel = round(record.km * rates.fuel);
+  const booking = record.bookings * rates.booking;
+  const rta = record.customers * rates.rta;
   const deductions = round(fuel + booking + rta + record.tolls);
 
   return {
@@ -592,7 +605,7 @@ function dailyPlan(date, allRecords, configuration, enteredNet, status="working"
   const period=targetPeriod(monthForDate(date)),inPeriod=d=>d>=period.start&&d<=period.end;
   const prior=round(Object.entries(allRecords)
     .filter(([d,r])=>inPeriod(d)&&d<date&&!isOff(r))
-    .reduce((sum,[,r])=>sum+round(r.meter-(r.posTips??0)-(r.halabPeak??0)-round(round(r.km*configuration.fuel)+r.bookings*configuration.booking+r.customers*configuration.rta+r.tolls)),0));
+    .reduce((sum,[d,r])=>sum+calculate(r,d).net,0));
   const total=round(prior+enteredNet);
   const excluded=Object.entries(allRecords).filter(([d,r])=>inPeriod(d)&&d!==date&&isOff(r));
   const currentOff=status!=="working";
@@ -620,7 +633,7 @@ function updateDailyPlan(net) {
 function preview() {
   syncDayStatus();
   const record = readForm();
-  const result = calculate(record);
+  const result = calculate(record,$("date").value);
   updateDailyPlan(result.net);
 
   $("removedHalabPeak").textContent=money(record.halabPeak??0);
@@ -643,6 +656,7 @@ function preview() {
 
 function loadDay(date) {
   $("date").value = date;
+  renderRatesForDate(date);
   const record = records[date];
   $("dayStatus").value=record?.status||"working";
 
@@ -662,7 +676,7 @@ function monthSummary() {
   const [year,monthNumber]=month.split("-").map(Number);
   const period=targetPeriod(month),count=period.dates.length,now=today();
   const entries=Object.entries(records).filter(([date])=>date>=period.start&&date<=period.end).sort(([a],[b])=>a.localeCompare(b));
-  const total=round(entries.reduce((sum,[,record])=>sum+calculate(record).net,0));
+  const total=round(entries.reduce((sum,[date,record])=>sum+calculate(record,date).net,0));
   const elapsed=period.dates.filter(date=>date<now||(date===now&&records[now])).length;
   const excluded=entries.filter(([,record])=>isOff(record));
   const countedDays=count-excluded.length;
@@ -728,7 +742,7 @@ function collectionChartData(summary){
  for(const date of summary.dates.slice(0,summary.elapsed)){
   const record=records[date];
   if(isOff(record))continue;
-  days.push({date,value:record?calculate(record).net:0,saved:Boolean(record)});
+  days.push({date,value:record?calculate(record,date).net:0,saved:Boolean(record)});
  }
  const total=round(days.reduce((sum,d)=>sum+d.value,0));
  return {days,total,average:days.length?total/days.length:0};
@@ -839,13 +853,13 @@ function render() {
 
   $("deductionTotal").textContent = money(
     summary.entries.reduce(
-      (sum, [, record]) => sum + calculate(record).deductions, 0
+      (sum, [date, record]) => sum + calculate(record,date).deductions, 0
     )
   );
 
   $("achieved").textContent =
     summary.entries.filter(
-      ([, record]) => calculate(record).net >= DAILY_TARGET
+      ([date, record]) => calculate(record,date).net >= DAILY_TARGET
     ).length + " / " + summary.countedDays;
 
   const calendar = $("calendar");
@@ -868,7 +882,7 @@ function render() {
   for (const date of summary.dates) {
     const day=Number(date.slice(8));
     const record = records[date];
-    const result = record ? calculate(record) : null;
+    const result = record ? calculate(record,date) : null;
     const button = document.createElement("button");
 
     button.type = "button";
@@ -905,7 +919,7 @@ function render() {
   history.replaceChildren();
 
   summary.entries.forEach(([date, record]) => {
-    const result = calculate(record);
+    const result = calculate(record,date);
     const row = document.createElement("tr");
 
     [
@@ -1117,7 +1131,7 @@ $("csv").onclick = () => {
   ];
 
   summary.entries.forEach(([date, record]) => {
-    const result = calculate(record);
+    const result = calculate(record,date);
     lines.push([
       date,
       record.status||"working",
@@ -1164,9 +1178,12 @@ function switchKabiProfile(){
 }
 $("kabiVehicle").addEventListener("change",switchKabiProfile);
 $("kabiShift").addEventListener("change",switchKabiProfile);
-$("companyRates").textContent=company.name+" · Daily target "+money(DAILY_TARGET)+" · Fuel "+money(company.fuel)+"/hired km · Booking "+money(company.booking)+" · RTA "+money(company.rta)+"/trip";
-$("fuelLabel").textContent="Fuel: hired km × "+money(company.fuel);
-$("bookingLabel").textContent="Bookings: "+money(company.booking)+" each";
+function renderRatesForDate(date){
+  const rates=ratesForDate(date);
+  $("companyRates").textContent=company.name+" · Daily target "+money(DAILY_TARGET)+" · Fuel "+money(rates.fuel)+"/hired km · Booking "+money(rates.booking)+" · RTA "+money(rates.rta)+"/trip";
+  $("fuelLabel").textContent="Fuel: hired km × "+money(rates.fuel);
+  $("bookingLabel").textContent="Bookings: "+money(rates.booking)+" each";
+}
 $("calendarLegend").textContent="Green: "+money(DAILY_TARGET)+" or more · Amber: below target · OFF: excluded day";
 $("achievedLabel").textContent="Days reaching "+money(DAILY_TARGET);
 $("footerTarget").textContent=company.name+" daily target: "+money(DAILY_TARGET)+" after all deductions.";
