@@ -1,3 +1,6 @@
+Warning: truncated output (original token count: 21623)
+Total output lines: 1582
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -489,6 +492,10 @@ let records = {};
 let storageBlocked=false,loadedRaw=null;
 const COPY_KEY=KEY+"-recovery-copy";
 const PREVIOUS_KEY=KEY+"-previous-copy";
+// Kept permanently on this device when an older/invalid entry is found.  This
+// means a new collection can still be saved without silently throwing away the
+// original browser data.
+const UNREADABLE_KEY=KEY+"-unreadable-backup";
 function inspectStored(raw){
   const valid={},invalid=[];
   if(raw===null)return {valid,invalid};
@@ -506,7 +513,7 @@ try{
   const found=inspectStored(loadedRaw);
   records=found.valid;
   storageBlocked=found.invalid.length>0;
-  if(storageBlocked)$("storageNotice").textContent="Some saved entries could not be loaded. Valid days are displayed. Saving is blocked to protect the original data. Download device recovery data.";
+  if(storageBlocked)$("storageNotice").textContent="Some old saved entries could not be read. Valid days are displayed. Your next save will keep a protected recovery copy and continue saving normally.";
 }catch(error){
   storageBlocked=true;
   $("storageNotice").textContent="Cannot access this browser's saved data. Saving is blocked. Use the original browser and check its storage settings.";
@@ -526,8 +533,23 @@ function storageInventory(){
 }
 function persist(next) {
   if(storageBlocked){
-    $("message").textContent="Saving blocked to protect unreadable data. Download device recovery data first.";
-    return false;
+    try{
+      // Do this before replacing the main record.  Older app versions or an
+      // interrupted browser write can leave one bad item that used to lock the
+      // whole profile forever on some phones.
+      if(localStorage.getItem(UNREADABLE_KEY)===null)localStorage.setItem(UNREADABLE_KEY,loadedRaw||"");
+      const text=JSON.stringify(next);
+      if(loadedRaw!==null)localStorage.setItem(PREVIOUS_KEY,loadedRaw);
+      localStorage.setItem(COPY_KEY,text);
+      localStorage.setItem(KEY,text);
+      loadedRaw=text;records=next;storageBlocked=false;
+      storageInventory();
+      $("storageNotice").textContent="Collection saving was repaired. A protected copy of the unreadable older data remains in device recovery data.";
+      return true;
+    }catch(error){
+      $("message").textContent="Unable to repair device saving. Download device recovery data and check browser storage.";
+      return false;
+    }
   }
   try{
     const current=localStorage.getItem(KEY);
@@ -638,139 +660,7 @@ function preview() {
 
   $("removedHalabPeak").textContent=money(record.halabPeak??0);
   $("peakDriver").textContent=money(round((record.halabPeak??0)*0.4));
-  $("peakCompany").textContent=money(round((record.halabPeak??0)-round((record.halabPeak??0)*0.4)));
-  $("removedPosTips").textContent=money(record.posTips??0);
-  $("collectionWithoutTips").textContent=money(result.collection??0);
-  $("fuel").textContent = money(result.fuel);
-  $("bookingFee").textContent = money(result.booking);
-  $("rta").textContent = money(result.rta);
-  $("tollFee").textContent = money(record.tolls);
-  $("deductions").textContent = money(result.deductions);
-  $("net").textContent = money(result.net);
-
-  $("dailyStatus").textContent =
-    isOff(record) ? "Non-working day: daily target removed when saved." : result.net >= DAILY_TARGET
-      ? "Target reached! " + money(result.net - DAILY_TARGET) + " above target."
-      : money(DAILY_TARGET - result.net) + " below the daily target.";
-}
-
-function loadDay(date) {
-  $("date").value = date;
-  renderRatesForDate(date);
-  const record = records[date];
-  $("dayStatus").value=record?.status||"working";
-
-  fields.forEach(key => {
-    $(key).value = record ? record[key] : key === "tolls" ? 0 : "";
-  });
-
-  $("halabPeak").value=record?.halabPeak??0;
-  $("posTips").value=record?.posTips??0;
-  $("delete").disabled = !record;
-  preview();
-  render();
-}
-
-function monthSummary() {
-  const month=$("month").value;
-  const [year,monthNumber]=month.split("-").map(Number);
-  const period=targetPeriod(month),count=period.dates.length,now=today();
-  const entries=Object.entries(records).filter(([date])=>date>=period.start&&date<=period.end).sort(([a],[b])=>a.localeCompare(b));
-  const total=round(entries.reduce((sum,[date,record])=>sum+calculate(record,date).net,0));
-  const elapsed=period.dates.filter(date=>date<now||(date===now&&records[now])).length;
-  const excluded=entries.filter(([,record])=>isOff(record));
-  const countedDays=count-excluded.length;
-  const remainingExcluded=excluded.filter(([date])=>period.dates.indexOf(date)>=elapsed).length;
-  const days = count - elapsed - remainingExcluded;
-  const target = countedDays * DAILY_TARGET;
-  const remaining = Math.max(0, round(target - total));
-
-  return {
-    month,
-    ...period,
-    elapsed,
-    year,
-    monthNumber,
-    count,
-    countedDays,
-    excludedDays:excluded.length,
-    entries,
-    total,
-    halabPeak:round(entries.reduce((sum,[,record])=>sum+(record.halabPeak??0),0)),
-    peakDriver:round(entries.reduce((sum,[,record])=>sum+round((record.halabPeak??0)*0.4),0)),
-    posTips:round(entries.reduce((sum,[,record])=>sum+(record.posTips??0),0)),
-    target,
-    remaining,
-    days,
-    required: days ? remaining / days : 0
-  };
-}
-
-
-function arabiaCommission(total, calendarDays) {
-  if(calendarDays<=0)return {average:0,rate:0,driver:0,companyShare:0};
-  const rate = total >= 350 * calendarDays ? 35
-    : total >= 300 * calendarDays ? 30
-    : total >= 275 * calendarDays ? 25
-    : total >= 250 * calendarDays ? 20
-    : total >= 200 * calendarDays ? 15 : 10;
-  const driver = round(total * rate / 100);
-  return {average: total / calendarDays, rate, driver, companyShare: round(total - driver)};
-}
-function renderArabiaSalary(summary) {
-  $("arabiaSalary").hidden = companyId !== "arabia";
-  $("salaryUnavailable").hidden=companyId==="arabia";
-  if (companyId !== "arabia") return;
-  const lastDate = summary.month + "-" + String(summary.count).padStart(2, "0");
-  const available = today() >= lastDate;
-  $("salaryDetails").hidden = !available;
-  $("salaryWaiting").hidden = available;
-  $("salaryWaiting").textContent = "Your salary calculation appears on " + lastDate + " after saving your collections.";
-  if (!available) return;
-  const salary = arabiaCommission(summary.total, summary.countedDays);
-  $("salaryNet").textContent = money(summary.total);
-  $("salaryAverage").textContent = money(salary.average);
-  $("salaryRate").textContent = salary.rate + "%";
-  $("salaryDriver").textContent = money(salary.driver);
-  $("salaryCompany").textContent = money(salary.companyShare) + " (" + (100 - salary.rate) + "%)";
-  $("salaryNote").textContent = "Calculated across " + summary.countedDays + " counted days; " + summary.excludedDays + " accident/breakdown days excluded. Missing entries count as zero. Commission uses the unrounded average.";
-}
-
-
-function collectionChartData(summary){
- const days=[];
- for(const date of summary.dates.slice(0,summary.elapsed)){
-  const record=records[date];
-  if(isOff(record))continue;
-  days.push({date,value:record?calculate(record,date).net:0,saved:Boolean(record)});
- }
- const total=round(days.reduce((sum,d)=>sum+d.value,0));
- return {days,total,average:days.length?total/days.length:0};
-}
-let selectedCollectionDate=null;
-function renderCollectionChart(summary){
- const data=collectionChartData(summary);
- $("chartCompany").textContent=company.name;
- $("chartTotal").textContent=money(data.total);
- $("chartAverage").textContent=money(data.average);
- $("chartTips").textContent=money(summary.posTips);
- $("chartRange").textContent="My Collections · "+(companyId==="dtc"?summary.start+" to "+summary.end:summary.month);
- $("chartAverageNote").textContent="Average across "+data.days.length+" counted days so far. Missing days count as zero; accident/breakdown days are excluded. Collections exclude POS tips, Halab Peak and normal deductions.";
- const thresholdLabel=companyId==="arabia"?"35% commission threshold":"Daily target";
- $("chartTargetLegend").textContent=thresholdLabel+" · "+money(DAILY_TARGET);
- const host=$("dailyCollectionChart");host.replaceChildren();
- $("chartPicked").textContent=data.days.length?"Tap a day: blue = target achieved, yellow = below target. Grey = not entered.":"Save your first collection to see daily bars.";
- if(!data.days.length)return;
- const width=Math.max(340,data.days.length*42+80),height=330,left=18,right=78,top=40,bottom=45;
- const plotW=width-left-right,plotH=height-top-bottom;
- const low=Math.min(0,...data.days.map(d=>d.value),data.average);
- const high=Math.max(DAILY_TARGET,data.average,...data.days.map(d=>d.value),1);
- const min=low<0?Math.floor(low/100)*100:0,max=Math.ceil(high*1.18/100)*100;
- const y=n=>top+(max-n)/(max-min)*plotH,step=plotW/data.days.length;
- const ns="http://www.w3.org/2000/svg";
- const svg=document.createElementNS(ns,"svg");svg.setAttribute("viewBox","0 0 "+width+" "+height);svg.style.cssText="display:block;width:100%;min-width:"+(data.days.length>7?width:0)+"px";
- svg.setAttribute("role","group");svg.setAttribute("aria-label","Daily clean collections with average and "+thresholdLabel);
- function node(tag,attrs,text){const n=document.createElementNS(ns,tag);for(const[k,v]of Object.entries(attrs))n.setAttribute(k,String(v));if(text!==undefined)n.textContent=text;svg.append(n);return n;}
+  $("peakCompany").textContent=mon…1623 tokens truncated… n=document.createElementNS(ns,tag);for(const[k,v]of Object.entries(attrs))n.setAttribute(k,String(v));if(text!==undefined)n.textContent=text;svg.append(n);return n;}
  for(let i=0;i<=3;i++){
   const val=min+(max-min)*i/3;
   node("line",{x1:left,y1:y(val),x2:width-right,y2:y(val),stroke:"#dcdde4","stroke-dasharray":"5 7"});
