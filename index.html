@@ -1,5 +1,5 @@
-Warning: truncated output (original token count: 20146)
-Total output lines: 1502
+Warning: truncated output (original token count: 21364)
+Total output lines: 1563
 
 <!DOCTYPE html>
 <html lang="en">
@@ -91,12 +91,13 @@ main{padding:14px}
 <div id="kabiOptions" class="fields" hidden>
 <label>Vehicle<select id="kabiVehicle"><option value="innova">Toyota Innova</option><option value="camry">Toyota Camry</option><option value="sonata">Hyundai Sonata</option></select></label>
 <label>Shift<select id="kabiShift"><option value="day">Day shift</option><option value="night">Night shift</option></select></label>
-<p class="muted" style="grid-column:1/-1">Collections are kept separately for each vehicle and shift.</p>
+<p class="muted" style="grid-column:1/-1">Collections and backups are kept separately for each vehicle and shift.</p>
 </div><p class="muted" id="companyRates"></p>
 
 <section class="panel" id="installPanel" style="margin:18px 0">
 <div class="row"><img src="./icons/taxi-logo.svg" width="52" height="52" alt="" style="object-fit:contain"><div style="flex:1"><strong>Install My Taxi</strong><p id="installHelp" class="muted" style="margin:6px 0">Install on your phone to open in its own app window.</p></div><button type="button" id="installApp">Install app</button></div>
 </section>
+<section class="panel" style="margin:18px 0"><h2>Saved data and recovery</h2><p id="storageNotice" role="status" aria-live="polite"></p><p class="muted">Check your company, vehicle, shift and View month. Records are separate for each profile. Open this app in the same browser where you saved them.</p><div id="storedProfiles"></div><div class="row"><button type="button" class="secondary" id="recoverLocal">Recover missing days</button><button type="button" class="secondary" id="exportRaw">Download device recovery data</button></div><p class="muted">Download backup regularly. Device recovery copies do not protect against clearing browser data or losing this phone.</p></section>
 <label>View month
 <input type="month" id="month">
 </label>
@@ -366,11 +367,11 @@ function showTaxiScreen(name,focus=false){
   }
   const salaryNote=document.createElement("p");salaryNote.className="muted";salaryNote.id="salaryUnavailable";
   salaryNote.textContent="Month-end salary tiers are available for Arabia Taxi. Choose Arabia Taxi in Settings & Partners to view them.";
-  screens.dashboard.append(fold("Saved collections",[document.getElementById("history").closest("section.panel")]));
+  screens.dashboard.append(fold("Salary and commission",[document.getElementById("arabiaSalary"),salaryNote]),fold("Saved collections and backups",[document.getElementById("history").closest("section.panel")]));
   const settings=document.createElement("section");settings.className="panel";
   const heading=document.createElement("h2");heading.textContent="Settings";
   settings.append(heading,document.getElementById("company").closest("label"),document.getElementById("kabiOptions"));
-  screens.more.append(settings,document.getElementById("partnershipSection"),document.getElementById("installPanel"),main.querySelector("footer"));
+  screens.more.append(settings,document.getElementById("partnershipSection"),document.getElementById("installPanel"),fold("Saved data and recovery",[document.getElementById("storageNotice").closest("section.panel")]),main.querySelector("footer"));
   layout.remove();
   main.querySelector("h1").textContent="🚕 My Taxi";
   const subtitle=main.querySelector("p.muted");subtitle.textContent="Your collections, calendar and targets in one place";
@@ -488,6 +489,9 @@ function calculate(record, date=$("date")?.value||today()) {
 }
 
 let records = {};
+let storageBlocked=false,loadedRaw=null;
+const COPY_KEY=KEY+"-recovery-copy";
+const PREVIOUS_KEY=KEY+"-previous-copy";
 function inspectStored(raw){
   const valid={},invalid=[];
   if(raw===null)return {valid,invalid};
@@ -501,20 +505,77 @@ function inspectStored(raw){
   return {valid,invalid};
 }
 try{
-  records=inspectStored(localStorage.getItem(KEY)).valid;
+  loadedRaw=localStorage.getItem(KEY);
+  const found=inspectStored(loadedRaw);
+  records=found.valid;
+  storageBlocked=found.invalid.length>0;
+  if(storageBlocked)$("storageNotice").textContent="Some saved entries could not be loaded. Valid days are displayed. Saving is blocked to protect the original data. Download device recovery data.";
 }catch(error){
-  records={};
+  storageBlocked=true;
+  $("storageNotice").textContent="Cannot access this browser's saved data. Saving is blocked. Use the original browser and check its storage settings.";
+}
+function storageInventory(){
+  const list=$("storedProfiles");list.replaceChildren();
+  try{
+    const keys=Object.keys(localStorage).filter(k=>/^taxi-collection/.test(k)&&!/-recovery-copy$|-previous-copy$/.test(k));
+    for(const key of keys){
+      const found=inspectStored(localStorage.getItem(key)),dates=Object.keys(found.valid).sort();
+      const p=document.createElement("p");
+      p.textContent=key.replace("taxi-collection","Profile")+" — "+dates.length+" saved days"+(dates.length?" ("+dates[0]+" to "+dates.at(-1)+")":"")+(found.invalid.length?" · unreadable entries: "+found.invalid.length:"");
+      list.append(p);
+    }
+    if(!storageBlocked)$("storageNotice").textContent=Object.keys(records).length+" saved days in the selected profile. "+(Object.keys(records).length?"Choose View month to see earlier records.":"Check other profiles below or try Recover missing days.");
+  }catch(error){$("storageNotice").textContent="Unable to inspect device storage.";}
 }
 function persist(next) {
+  if(storageBlocked){
+    $("message").textContent="Saving blocked to protect unreadable data. Download device recovery data first.";
+    return false;
+  }
   try{
-    localStorage.setItem(KEY,JSON.stringify(next));
-    records=next;
+    const current=localStorage.getItem(KEY);
+    if(current!==loadedRaw){
+      $("message").textContent="Saved data changed in another app window. Reopen this app before saving to avoid overwriting those changes.";
+      return false;
+    }
+    const text=JSON.stringify(next);
+    // Preserve the previous state before touching the primary copy.
+    if(current!==null)localStorage.setItem(PREVIOUS_KEY,current);
+    localStorage.setItem(COPY_KEY,text);
+    localStorage.setItem(KEY,text);
+    loadedRaw=text;records=next;
+    storageInventory();
     return true;
   }catch(error){
-    $("message").textContent="Unable to save. Check this browser allows site storage, then try again.";
+    $("message").textContent="Unable to finish saving. Download a backup and check browser storage. A recovery copy may be available.";
     return false;
   }
 }
+$("exportRaw").onclick=()=>{
+  try{
+    const data={exportedAt:new Date().toISOString(),selectedProfile:KEY,storage:{}};
+    Object.keys(localStorage).filter(k=>k.startsWith("taxi-collection")).forEach(k=>data.storage[k]=localStorage.getItem(k));
+    download(JSON.stringify(data,null,2),"taxi-device-recovery-"+today()+".json","application/json");
+  }catch(error){$("storageNotice").textContent="Unable to export device storage.";}
+};
+$("recoverLocal").onclick=()=>{
+  if(storageBlocked){$("storageNotice").textContent="Original data has unreadable entries. Download device recovery data so it can be repaired without overwriting it.";return;}
+  try{
+    // Latest recovery copy has priority; older copy supplies missing dates only.
+    const older=inspectStored(localStorage.getItem(PREVIOUS_KEY)).valid;
+    const latest=inspectStored(localStorage.getItem(COPY_KEY)).valid;
+    const combined={...older,...latest,...records};
+    const missing=Object.keys(combined).filter(d=>!Object.hasOwn(records,d));
+    if(!missing.length){$("storageNotice").textContent="No additional days found in this profile's recovery copies. Check the original browser, company, vehicle, shift and month, or your downloaded backups.";return;}
+    if(!confirm("Recover "+missing.length+" missing days for this profile? Previously deleted days may be included. Existing days will stay unchanged."))return;
+    if(persist(combined)){
+      const last=Object.keys(combined).sort().at(-1);
+      $("month").value=monthForDate(last);showTaxiScreen("collection");loadDay(last);
+      $("storageNotice").textContent="Recovered "+missing.length+" missing days. Download backup now.";
+    }
+  }catch(error){$("storageNotice").textContent="Unable to read recovery copies.";}
+};
+storageInventory();
 
 function readForm() {
   const status=$("dayStatus").value;
@@ -603,110 +664,7 @@ function loadDay(date) {
   $("dayStatus").value=record?.status||"working";
 
   fields.forEach(key => {
-    $(key).value = record ? record[key] : key === "tolls" ? 0 : "";
-  });
-
-  $("halabPeak").value=record?.halabPeak??0;
-  $("posTips").value=record?.posTips??0;
-  $("delete").disabled = !record;
-  preview();
-  render();
-}
-
-function monthSummary() {
-  const month=$("month").value;
-  const [year,monthNumber]=month.split("-").map(Number);
-  const period=targetPeriod(month),count=period.dates.length,now=today();
-  const entries=Object.entries(records).filter(([date])=>date>=period.start&&date<=period.end).sort(([a],[b])=>a.localeCompare(b));
-  const total=round(entries.reduce((sum,[date,record])=>sum+calculate(record,date).net,0));
-  const elapsed=period.dates.filter(date=>date<now||(date===now&&records[now])).length;
-  const excluded=entries.filter(([,record])=>isOff(record));
-  const countedDays=count-excluded.length;
-  const remainingExcluded=excluded.filter(([date])=>period.dates.indexOf(date)>=elapsed).length;
-  const days = count - elapsed - remainingExcluded;
-  const target = countedDays * DAILY_TARGET;
-  const remaining = Math.max(0, round(target - total));
-
-  return {
-    month,
-    ...period,
-    elapsed,
-    year,
-    monthNumber,
-    count,
-    countedDays,
-    excludedDays:excluded.length,
-    entries,
-    total,
-    halabPeak:round(entries.reduce((sum,[,record])=>sum+(record.halabPeak??0),0)),
-    peakDriver:round(entries.reduce((sum,[,record])=>sum+round((record.halabPeak??0)*0.4),0)),
-    posTips:round(entries.reduce((sum,[,record])=>sum+(record.posTips??0),0)),
-    target,
-    remaining,
-    days,
-    required: days ? remaining / days : 0
-  };
-}
-
-
-function arabiaCommission(total, calendarDays) {
-  if(calendarDays<=0)return {average:0,rate:0,driver:0,companyShare:0};
-  const rate = total >= 350 * calendarDays ? 35
-    : total >= 300 * calendarDays ? 30
-    : total >= 275 * calendarDays ? 25
-    : total >= 250 * calendarDays ? 20
-    : total >= 200 * calendarDays ? 15 : 10;
-  const driver = round(total * rate / 100);
-  return {average: total / calendarDays, rate, driver, companyShare: round(total - driver)};
-}
-function renderArabiaSalary(summary) {
-  $("arabiaSalary").hidden = companyId !== "arabia";
-  $("salaryUnavailable").hidden=companyId==="arabia";
-  if (companyId !== "arabia") return;
-  const lastDate = summary.month + "-" + String(summary.count).padStart(2, "0");
-  const available = today() >= lastDate;
-  $("salaryDetails").hidden = !available;
-  $("salaryWaiting").hidden = available;
-  $("salaryWaiting").textContent = "Your salary calculation appears on " + lastDate + " after saving your collections.";
-  if (!available) return;
-  const salary = arabiaCommission(summary.total, summary.countedDays);
-  $("salaryNet").textContent = money(summary.total);
-  $("salaryAverage").textContent = money(salary.average);
-  $("salaryRate").textContent = salary.rate + "%";
-  $("salaryDriver").textContent = money(salary.driver);
-  $("salaryCompany").textContent = money(salary.companyShare) + " (" + (100 - salary.rate) + "%)";
-  $("salaryNote").textContent = "Calculated across " + summary.countedDays + " counted days; " + summary.excludedDays + " accident/breakdown days excluded. Missing entries count as zero. Commission uses the unrounded average.";
-}
-
-
-function collectionChartData(summary){
- const days=[];
- for(const date of summary.dates.slice(0,summary.elapsed)){
-  const record=records[date];
-  if(isOff(record))continue;
-  days.push({date,value:record?calculate(record,date).net:0,saved:Boolean(record)});
- }
- const total=round(days.reduce((sum,d)=>sum+d.value,0));
- return {days,total,average:days.length?total/days.length:0};
-}
-let selectedCollectionDate=null;
-function renderCollectionChart(summary){
- const data=collectionChartData(summary);
- $("chartCompany").textContent=company.name;
- $("chartTotal").textContent=money(data.total);
- $("chartAverage").textContent=money(data.average);
- $("chartTips").textContent=money(summary.posTips);
- $("chartRange").textContent="My Collections · "+(companyId==="dtc"?summary.start+" to "+summary.end:summary.month);
- $("chartAverageNote").textContent="Average across "+data.days.length+" counted days so far. Missing days count as zero; accident/breakdown days are excluded. Collections exclude POS tips, Halab Peak and normal deductions.";
- const thresholdLabel=companyId==="arabia"?"35% commission threshold":"Daily target";
- $("chartTargetLegend").textContent=thresholdLabel+" · "+money(DAILY_TARGET);
- const host=$("dailyCollectionChart");host.replaceChildren();
- $("chartPicked").textContent=data.days.length?"Tap a day: blue = target achieved, yellow = below target. Grey = not entered.":"Save your first collection to see daily bars.";
- if(!data.days.length)return;
- const width=Math.max(340,data.days.length*42+80),height=330,left=18,right=78,top=40,bottom=45;
- const plotW=width-left-right,plotH=height-top-bottom;
- const low=Math.min(0,...data.days.map(d=>d.value),data.average);
- const high=Math.max(DAILY_TARGET,d…146 tokens truncated… n=document.createElementNS(ns,tag);for(const[k,v]of Object.entries(attrs))n.setAttribute(k,String(v));if(text!==undefined)n.textContent=text;svg.append(n);return n;}
+    $(key).value = record ? record[key] : key === "tolls" ? 0 : …1364 tokens truncated… n=document.createElementNS(ns,tag);for(const[k,v]of Object.entries(attrs))n.setAttribute(k,String(v));if(text!==undefined)n.textContent=text;svg.append(n);return n;}
  for(let i=0;i<=3;i++){
   const val=min+(max-min)*i/3;
   node("line",{x1:left,y1:y(val),x2:width-right,y2:y(val),stroke:"#dcdde4","stroke-dasharray":"5 7"});
