@@ -1,4 +1,4 @@
-Warning: truncated output (original token count: 20172)
+Warning: truncated output (original token count: 20146)
 Total output lines: 1502
 
 <!DOCTYPE html>
@@ -91,7 +91,7 @@ main{padding:14px}
 <div id="kabiOptions" class="fields" hidden>
 <label>Vehicle<select id="kabiVehicle"><option value="innova">Toyota Innova</option><option value="camry">Toyota Camry</option><option value="sonata">Hyundai Sonata</option></select></label>
 <label>Shift<select id="kabiShift"><option value="day">Day shift</option><option value="night">Night shift</option></select></label>
-<p class="muted" style="grid-column:1/-1">Collections and backups are kept separately for each vehicle and shift.</p>
+<p class="muted" style="grid-column:1/-1">Collections are kept separately for each vehicle and shift.</p>
 </div><p class="muted" id="companyRates"></p>
 
 <section class="panel" id="installPanel" style="margin:18px 0">
@@ -366,7 +366,7 @@ function showTaxiScreen(name,focus=false){
   }
   const salaryNote=document.createElement("p");salaryNote.className="muted";salaryNote.id="salaryUnavailable";
   salaryNote.textContent="Month-end salary tiers are available for Arabia Taxi. Choose Arabia Taxi in Settings & Partners to view them.";
-  screens.dashboard.append(fold("Salary and commission",[document.getElementById("arabiaSalary"),salaryNote]),fold("Saved collections and backups",[document.getElementById("history").closest("section.panel")]));
+  screens.dashboard.append(fold("Saved collections",[document.getElementById("history").closest("section.panel")]));
   const settings=document.createElement("section");settings.className="panel";
   const heading=document.createElement("h2");heading.textContent="Settings";
   settings.append(heading,document.getElementById("company").closest("label"),document.getElementById("kabiOptions"));
@@ -704,7 +704,9 @@ function renderCollectionChart(summary){
  $("chartPicked").textContent=data.days.length?"Tap a day: blue = target achieved, yellow = below target. Grey = not entered.":"Save your first collection to see daily bars.";
  if(!data.days.length)return;
  const width=Math.max(340,data.days.length*42+80),height=330,left=18,right=78,top=40,bottom=45;
- const plotW=width-left-right,plotH=height-top-bo…172 tokens truncated… n=document.createElementNS(ns,tag);for(const[k,v]of Object.entries(attrs))n.setAttribute(k,String(v));if(text!==undefined)n.textContent=text;svg.append(n);return n;}
+ const plotW=width-left-right,plotH=height-top-bottom;
+ const low=Math.min(0,...data.days.map(d=>d.value),data.average);
+ const high=Math.max(DAILY_TARGET,d…146 tokens truncated… n=document.createElementNS(ns,tag);for(const[k,v]of Object.entries(attrs))n.setAttribute(k,String(v));if(text!==undefined)n.textContent=text;svg.append(n);return n;}
  for(let i=0;i<=3;i++){
   const val=min+(max-min)*i/3;
   node("line",{x1:left,y1:y(val),x2:width-right,y2:y(val),stroke:"#dcdde4","stroke-dasharray":"5 7"});
