@@ -228,6 +228,7 @@ main{padding:14px}
 <p><span>Counted target days / excluded days</span><strong id="targetDays"></strong></p>
 <p><span>Total shift collection</span><strong id="grossTotal"></strong></p>
 <p><span>Total deductions</span><strong id="deductionTotal"></strong></p>
+<p><span>Total fuel ⛽ deduction</span><strong id="fuelDeductionTotal"></strong></p>
 <p><span><span id="achievedLabel">Days reaching target</span></span><strong id="achieved"></strong></p>
 </div>
 
@@ -854,6 +855,11 @@ function render() {
   $("deductionTotal").textContent = money(
     summary.entries.reduce(
       (sum, [date, record]) => sum + calculate(record,date).deductions, 0
+    )
+  );
+  $("fuelDeductionTotal").textContent = money(
+    summary.entries.reduce(
+      (sum, [date, record]) => sum + calculate(record,date).fuel, 0
     )
   );
 
